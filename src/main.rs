@@ -1,4 +1,9 @@
+use goblin::Object;
+use gumdrop::Options;
+use std::error;
 use std::ffi::c_void;
+use std::fs;
+use std::path::Path;
 use std::ptr;
 
 type ProtoBridgeHandle = *mut c_void;
@@ -23,6 +28,8 @@ struct ProtoBridge(ProtoBridgeHandle);
 const CMD_ID_READ: u8 = 1;
 const CMD_ID_WRITE: u8 = 2;
 
+const REG_IDX_DEV_EN: u16 = 0;
+
 impl ProtoBridge {
     fn new() -> Self {
         let mut handle = ptr::null_mut();
@@ -36,6 +43,12 @@ impl ProtoBridge {
         ((id as u32 & 0xf) << 28) | ((addr as u32 & 0x3fff) << 14) | ((size - 1) as u32 & 0x3fff)
     }
 
+    fn build_reg_cmd(id: u8, idx: u16, data: u8) -> u32 {
+        ((id as u32 & 0xf) << 28)
+            | (((idx | 0x2000) as u32 & 0x3fff) << 14)
+            | (data as u32 & 0x3fff)
+    }
+
     fn send_cmd(&self, cmd: u32) -> bool {
         let mut ok = true;
         for byte_index in 0..4 {
@@ -45,6 +58,7 @@ impl ProtoBridge {
                     let byte_val = ((cmd >> (8 * byte_index)) & 0xff) as u8;
                     ClockProtoBridge(self.0, &byte_val, ptr::null_mut());
                 } else {
+                    ClockProtoBridge(self.0, ptr::null(), ptr::null_mut());
                     ok = false;
                     break;
                 }
@@ -79,6 +93,24 @@ impl ProtoBridge {
         bytes_read as usize
     }
 
+    fn read_reg(&self, idx: u16) -> Option<u8> {
+        let cmd = Self::build_reg_cmd(CMD_ID_READ, idx, 0);
+        if self.send_cmd(cmd) {
+            unsafe {
+                let status = QueryProtoBridgeDataStatus(self.0);
+                if status.is_output_empty == 0 {
+                    let mut val = 0;
+                    ClockProtoBridge(self.0, ptr::null(), &mut val);
+                    return Some(val);
+                } else {
+                    ClockProtoBridge(self.0, ptr::null(), ptr::null_mut());
+                }
+            }
+        }
+
+        None
+    }
+
     fn write_bytes(&self, addr: u16, buf: &[u8]) -> usize {
         let mut bytes_written = 0;
 
@@ -97,6 +129,11 @@ impl ProtoBridge {
             }
         }
         bytes_written as usize
+    }
+
+    fn write_reg(&self, idx: u16, data: u8) -> bool {
+        let cmd = Self::build_reg_cmd(CMD_ID_WRITE, idx, data);
+        self.send_cmd(cmd)
     }
 }
 
@@ -132,6 +169,61 @@ mod tests {
     }
 }
 
-fn main() {
-    // TODO: Read elf file from cmdline arguments and upload it to memory, then start device
+#[derive(Debug, Options)]
+struct SimOptions {
+    #[options(help = "print help message")]
+    help: bool,
+
+    #[options(help = "path to an elf file to execute")]
+    elf_path: String,
+}
+
+type Result<T> = std::result::Result<T, Box<dyn error::Error>>;
+
+fn main() -> Result<()> {
+    let opts = SimOptions::parse_args_default_or_exit();
+
+    let path = Path::new(&opts.elf_path);
+    let buffer = fs::read(path)?;
+    if let Object::Elf(elf) = Object::parse(&buffer)? {
+        let bridge = ProtoBridge::new();
+
+        for header in elf.program_headers {
+            if header.p_type == goblin::elf::program_header::PT_LOAD {
+                let program_data =
+                    &buffer[header.p_offset as usize..(header.p_offset + header.p_filesz) as usize];
+                let program_addr = header.p_paddr as u16;
+
+                let bytes_written = bridge.write_bytes(program_addr, program_data);
+
+                println!(
+                    "Uploaded {} byte loadable program segment to address {:#06x} in device memory",
+                    bytes_written, program_addr
+                );
+            }
+        }
+
+        let ok = bridge.write_reg(REG_IDX_DEV_EN, 1);
+        assert!(ok);
+        let mut current_cycle = 0;
+        let max_cycles = 1024;
+        loop {
+            let device_enabled = bridge.read_reg(REG_IDX_DEV_EN);
+            if device_enabled.is_some() && device_enabled.unwrap() == 0 {
+                println!("Device stopped!");
+                break;
+            } else {
+                println!("Device still running...");
+            }
+            current_cycle += 1;
+            if current_cycle >= max_cycles {
+                println!("Breaking out of execution loop due to timeout");
+                break;
+            }
+        }
+    } else {
+        eprint!("Invalid elf input file!");
+    }
+
+    Ok(())
 }
