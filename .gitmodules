@@ -1,0 +1,3 @@
+[submodule "third_party/protobridge"]
+	path = third_party/protobridge
+	url = https://github.com/impakt73/protobridge.git
