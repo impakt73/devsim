@@ -92,6 +92,12 @@ assign w_cmd_addr = r_cmd_buf[27:14];
 logic [13:0] w_cmd_size;
 assign w_cmd_size = r_cmd_buf[13:0];
 
+logic w_cmd_addr_is_reg;
+assign w_cmd_addr_is_reg = r_cmd_buf[27];
+
+logic [7:0] w_cmd_reg_write_data;
+assign w_cmd_reg_write_data = r_cmd_buf[7:0];
+
 enum bit[3:0]
 {
     cmd_id_reset,
@@ -100,6 +106,29 @@ enum bit[3:0]
 } cmd_id;
 
 logic [7:0] r_mem[16383:0];
+
+logic r_dev_en;
+logic [7:0] r_dev_clk_cnt;
+logic [31:0] r_dev_inst_buf;
+
+always_ff @ (posedge i_clk)
+    if (!i_rst_n)
+        begin
+            r_dev_clk_cnt <= 0;
+        end
+    else if (r_dev_en)
+        begin
+            r_dev_clk_cnt <= r_dev_clk_cnt + 1;
+            if (r_dev_clk_cnt == 255)
+                begin
+                    r_dev_en <= 0;
+                end
+            else
+                begin
+                    r_dev_en <= 1;
+                    r_dev_inst_buf <= { r_mem[({ 6'd0, r_dev_clk_cnt } * 4 + 3)], r_mem[({ 6'd0, r_dev_clk_cnt } * 4 + 2)], r_mem[({ 6'd0, r_dev_clk_cnt } * 4 + 1)], r_mem[({ 6'd0, r_dev_clk_cnt } * 4 + 0)] };
+                end
+        end
 
 always_ff @ (posedge i_clk)
     if (!i_rst_n)
@@ -110,12 +139,14 @@ always_ff @ (posedge i_clk)
             r_dev_rst <= 0;
             r_in_fifo_read <= 0;
             r_out_fifo_write <= 0;
+            r_dev_en <= 0;
         end
     else
         begin
             case (r_state)
                 cmd_state_idle:
                     begin
+                        r_out_fifo_write <= 0;
                         if (w_is_cmd_valid)
                             begin
                                 case (w_cmd_id)
@@ -126,19 +157,36 @@ always_ff @ (posedge i_clk)
                                     end
                                     cmd_id_read:
                                     begin
-                                        r_state <= cmd_state_read;
+                                        if (w_cmd_addr_is_reg)
+                                            begin
+                                                r_state <= cmd_state_idle;
+                                                r_out_fifo_input <= { 7'd0, r_dev_en };
+                                                r_out_fifo_write <= 1;
+                                            end
+                                        else
+                                            begin
+                                                r_state <= cmd_state_read;
 
-                                        // Move the end address value into the size field
-                                        r_cmd_buf[13:0] <= r_cmd_buf[27:14] + r_cmd_buf[13:0];
+                                                // Move the end address value into the size field
+                                                r_cmd_buf[13:0] <= r_cmd_buf[27:14] + r_cmd_buf[13:0];
+                                            end
                                     end
                                     cmd_id_write:
                                     begin
-                                        r_state <= cmd_state_write;
+                                        if (w_cmd_addr_is_reg)
+                                            begin
+                                                r_state <= cmd_state_idle;
+                                                r_dev_en <= w_cmd_reg_write_data[0];
+                                            end
+                                        else
+                                            begin
+                                                r_state <= cmd_state_write;
 
-                                        // Move the end address value into the size field
-                                        r_cmd_buf[13:0] <= r_cmd_buf[27:14] + r_cmd_buf[13:0];
+                                                // Move the end address value into the size field
+                                                r_cmd_buf[13:0] <= r_cmd_buf[27:14] + r_cmd_buf[13:0];
 
-                                        r_in_fifo_read <= w_is_data_available;
+                                                r_in_fifo_read <= w_is_data_available;
+                                            end
                                     end
                                     default:
                                     begin
