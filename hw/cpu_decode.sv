@@ -7,7 +7,7 @@ module cpu_decode
     output logic [4:0]  o_rs1,
     output logic [4:0]  o_rs2,
     output logic [9:0]  o_func,
-    output logic [31:0] o_imm,
+    output logic [19:0] o_imm,
     output logic        o_valid
 );
 
@@ -52,28 +52,28 @@ always_comb
             'b0110111,
             'b0010111:
                 begin
-                    o_imm = { { 12 { w_inst_u_imm[19] } }, w_inst_u_imm[19:0] };
+                    o_imm = w_inst_u_imm[19:0];
                     o_valid = 1;
                 end
 
             // J type
             'b1101111:
                 begin
-                    o_imm = { { 11 { w_inst_j_imm[19] } }, w_inst_j_imm[19:0], 1'b0 };
+                    o_imm = w_inst_j_imm[19:0];
                     o_valid = 1;
                 end
 
             // B type
             'b1100011:
                 begin
-                    o_imm = { { 19 { w_inst_b_imm[11] } }, w_inst_b_imm[11:0], 1'b0 };
+                    o_imm = { { 8 { w_inst_b_imm[11] } }, w_inst_b_imm[11:0] };
                     o_valid = 1;
                 end
 
             // S type
             'b0100011:
                 begin
-                    o_imm = { { 20 { w_inst_s_imm[11] } }, w_inst_s_imm[11:0] };
+                    o_imm = { { 8 { w_inst_s_imm[11] } }, w_inst_s_imm[11:0] };
                     o_valid = 1;
                 end
 
@@ -92,7 +92,7 @@ always_comb
             'b0001111,
             'b1110011:
                 begin
-                    o_imm = { { 20 { w_inst_i_imm[11] } }, w_inst_i_imm[11:0] };
+                    o_imm = { { 8 { w_inst_i_imm[11] } }, w_inst_i_imm[11:0] };
                     o_valid = 1;
                 end
 
