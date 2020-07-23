@@ -95,8 +95,6 @@ always_ff @ (posedge i_clk)
                     end
                 cpu_state_fetch_wait:
                     begin
-                        r_pc <= r_pc + 4;
-
                         r_state <= cpu_state_decode;
                     end
                 cpu_state_decode:
@@ -110,6 +108,10 @@ always_ff @ (posedge i_clk)
                         // Execute the instruction if it's valid
                         if (w_decode_valid)
                             begin
+                                // Default to moving the PC to the next instruction
+                                // Several instructions may override this behavior
+                                r_pc <= r_pc + 4;
+
                                 // TODO: Execute instruction here
                                 casez({ w_decode_func, w_decode_op })
 
@@ -118,7 +120,7 @@ always_ff @ (posedge i_clk)
                                         begin
                                             if (w_decode_rd_is_valid)
                                                 begin
-                                                    r_regs[w_decode_rd_idx] = { w_decode_imm, 12'b0 };
+                                                    r_regs[w_decode_rd_idx] <= { w_decode_imm, 12'b0 };
                                                 end
                                         end
 
@@ -127,48 +129,84 @@ always_ff @ (posedge i_clk)
                                         begin
                                             if (w_decode_rd_is_valid)
                                                 begin
-                                                    r_regs[w_decode_rd_idx] = r_pc + { w_decode_imm, 12'b0 };
+                                                    r_regs[w_decode_rd_idx] <= r_pc + { w_decode_imm, 12'b0 };
                                                 end
                                         end
 
                                     // jal
                                     17'b??????????1101111:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    r_regs[w_decode_rd_idx] <= r_pc + 4;
+                                                end
+
+                                            r_pc <= r_pc + { { 11 { w_decode_imm[19] } }, w_decode_imm, 1'b0 };
                                         end
 
                                     // jalr
                                     17'b???????0001100111:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    r_regs[w_decode_rd_idx] <= r_pc + 4;
+                                                end
+
+                                            r_pc <= (r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm }) & 'hfffffffe;
                                         end
 
                                     // beq
                                     17'b???????0001100011:
                                         begin
+                                            if (r_regs[w_decode_rs1_idx] == r_regs[w_decode_rs2_idx])
+                                                begin
+                                                    r_pc <= r_pc + { { 11 { w_decode_imm[19] } }, w_decode_imm, 1'b0 };
+                                                end
                                         end
 
                                     // bne
                                     17'b???????0011100011:
                                         begin
+                                            if (r_regs[w_decode_rs1_idx] != r_regs[w_decode_rs2_idx])
+                                                begin
+                                                    r_pc <= r_pc + { { 11 { w_decode_imm[19] } }, w_decode_imm, 1'b0 };
+                                                end
                                         end
 
                                     // blt
                                     17'b???????1001100011:
                                         begin
+                                            if ($signed(r_regs[w_decode_rs1_idx]) < $signed(r_regs[w_decode_rs2_idx]))
+                                                begin
+                                                    r_pc <= r_pc + { { 11 { w_decode_imm[19] } }, w_decode_imm, 1'b0 };
+                                                end
                                         end
 
                                     // bge
                                     17'b???????1011100011:
                                         begin
+                                            if ($signed(r_regs[w_decode_rs1_idx]) >= $signed(r_regs[w_decode_rs2_idx]))
+                                                begin
+                                                    r_pc <= r_pc + { { 11 { w_decode_imm[19] } }, w_decode_imm, 1'b0 };
+                                                end
                                         end
 
                                     // bltu
                                     17'b???????1101100011:
                                         begin
+                                            if (r_regs[w_decode_rs1_idx] < r_regs[w_decode_rs2_idx])
+                                                begin
+                                                    r_pc <= r_pc + { { 11 { w_decode_imm[19] } }, w_decode_imm, 1'b0 };
+                                                end
                                         end
 
                                     // bgeu
                                     17'b???????1111100011:
                                         begin
+                                            if (r_regs[w_decode_rs1_idx] >= r_regs[w_decode_rs2_idx])
+                                                begin
+                                                    r_pc <= r_pc + { { 11 { w_decode_imm[19] } }, w_decode_imm, 1'b0 };
+                                                end
                                         end
 
                                     // lb
@@ -216,7 +254,7 @@ always_ff @ (posedge i_clk)
                                         begin
                                             if (w_decode_rd_is_valid)
                                                 begin
-                                                    r_regs[w_decode_rd_idx] = r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm };
+                                                    r_regs[w_decode_rd_idx] <= r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm };
                                                 end
                                         end
 
@@ -265,7 +303,7 @@ always_ff @ (posedge i_clk)
                                         begin
                                             if (w_decode_rd_is_valid)
                                                 begin
-                                                    r_regs[w_decode_rd_idx] = r_regs[w_decode_rs1_idx] + r_regs[w_decode_rs2_idx];
+                                                    r_regs[w_decode_rd_idx] <= r_regs[w_decode_rs1_idx] + r_regs[w_decode_rs2_idx];
                                                 end
                                         end
 
@@ -274,7 +312,7 @@ always_ff @ (posedge i_clk)
                                         begin
                                             if (w_decode_rd_is_valid)
                                                 begin
-                                                    r_regs[w_decode_rd_idx] = r_regs[w_decode_rs1_idx] - r_regs[w_decode_rs2_idx];
+                                                    r_regs[w_decode_rd_idx] <= r_regs[w_decode_rs1_idx] - r_regs[w_decode_rs2_idx];
                                                 end
                                         end
 
