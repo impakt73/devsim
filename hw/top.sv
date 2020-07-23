@@ -109,7 +109,7 @@ logic [7:0] r_mem[16383:0];
 
 logic r_cpu_en;
 logic w_cpu_mem_write_en;
-logic [13:0] w_cpu_mem_addr_out;
+logic [31:0] w_cpu_mem_addr_out;
 logic [31:0] w_cpu_mem_data_out;
 logic [31:0] r_cpu_mem_data_in;
 logic w_cpu_is_halted;
@@ -159,6 +159,13 @@ always_ff @ (posedge i_clk)
                                         if (!w_cpu_mem_write_en)
                                             begin
                                                 r_cpu_mem_data_in <= { r_mem[w_cpu_mem_addr_out + 3], r_mem[w_cpu_mem_addr_out + 2], r_mem[w_cpu_mem_addr_out + 1], r_mem[w_cpu_mem_addr_out + 0] };
+                                            end
+                                        else
+                                            begin
+                                                r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
+                                                r_mem[w_cpu_mem_addr_out + 1] <= w_cpu_mem_data_out[15:8];
+                                                r_mem[w_cpu_mem_addr_out + 2] <= w_cpu_mem_data_out[23:16];
+                                                r_mem[w_cpu_mem_addr_out + 3] <= w_cpu_mem_data_out[31:24];
                                             end
                                     end
                             end
