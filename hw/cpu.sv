@@ -261,41 +261,87 @@ always_ff @ (posedge i_clk)
                                     // slti
                                     17'b???????0100010011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    if ($signed(r_regs[w_decode_rs1_idx]) < $signed({ { 12 { w_decode_imm[19] } }, w_decode_imm }))
+                                                        begin
+                                                            r_regs[w_decode_rd_idx] <= 1;
+                                                        end
+                                                    else
+                                                        begin
+                                                            r_regs[w_decode_rd_idx] <= 0;
+                                                        end
+                                                end
                                         end
 
                                     // sltiu
                                     17'b???????0110010011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    if (r_regs[w_decode_rs1_idx] < { { 12 { w_decode_imm[19] } }, w_decode_imm })
+                                                        begin
+                                                            r_regs[w_decode_rd_idx] <= 1;
+                                                        end
+                                                    else
+                                                        begin
+                                                            r_regs[w_decode_rd_idx] <= 0;
+                                                        end
+                                                end
                                         end
 
                                     // xori
                                     17'b???????1000010011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    r_regs[w_decode_rd_idx] <= r_regs[w_decode_rs1_idx] ^ { { 12 { w_decode_imm[19] } }, w_decode_imm };
+                                                end
                                         end
 
                                     // ori
                                     17'b???????1100010011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    r_regs[w_decode_rd_idx] <= r_regs[w_decode_rs1_idx] | { { 12 { w_decode_imm[19] } }, w_decode_imm };
+                                                end
                                         end
 
                                     // andi
                                     17'b???????1110010011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    r_regs[w_decode_rd_idx] <= r_regs[w_decode_rs1_idx] & { { 12 { w_decode_imm[19] } }, w_decode_imm };
+                                                end
                                         end
 
                                     // slli
                                     17'b00000000010010011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    r_regs[w_decode_rd_idx] <= r_regs[w_decode_rs1_idx] << { { 12 { w_decode_imm[19] } }, w_decode_imm };
+                                                end
                                         end
 
                                     // srli
                                     17'b00000001010010011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    r_regs[w_decode_rd_idx] <= r_regs[w_decode_rs1_idx] >> { { 12 { w_decode_imm[19] } }, w_decode_imm };
+                                                end
                                         end
 
                                     // srai
                                     17'b01000001010010011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    r_regs[w_decode_rd_idx] <= $signed(r_regs[w_decode_rs1_idx]) >> $signed({ { 12 { w_decode_imm[19] } }, w_decode_imm });
+                                                end
                                         end
 
                                     // add
@@ -319,41 +365,87 @@ always_ff @ (posedge i_clk)
                                     // sll
                                     17'b00000000010110011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    r_regs[w_decode_rd_idx] <= r_regs[w_decode_rs1_idx] << r_regs[w_decode_rs2_idx];
+                                                end
                                         end
 
                                     // slt
                                     17'b00000000100110011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    if ($signed(r_regs[w_decode_rs1_idx]) < $signed(r_regs[w_decode_rs2_idx]))
+                                                        begin
+                                                            r_regs[w_decode_rd_idx] <= 1;
+                                                        end
+                                                    else
+                                                        begin
+                                                            r_regs[w_decode_rd_idx] <= 0;
+                                                        end
+                                                end
                                         end
 
                                     // sltu
                                     17'b00000000110110011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    if (r_regs[w_decode_rs1_idx] < r_regs[w_decode_rs2_idx])
+                                                        begin
+                                                            r_regs[w_decode_rd_idx] <= 1;
+                                                        end
+                                                    else
+                                                        begin
+                                                            r_regs[w_decode_rd_idx] <= 0;
+                                                        end
+                                                end
                                         end
 
                                     // xor
                                     17'b00000001000110011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    r_regs[w_decode_rd_idx] <= r_regs[w_decode_rs1_idx] ^ r_regs[w_decode_rs2_idx];
+                                                end
                                         end
 
                                     // srl
                                     17'b00000001010110011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    r_regs[w_decode_rd_idx] <= r_regs[w_decode_rs1_idx] >> r_regs[w_decode_rs2_idx];
+                                                end
                                         end
 
                                     // sra
                                     17'b01000001010110011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    r_regs[w_decode_rd_idx] <= $signed(r_regs[w_decode_rs1_idx]) >> $signed(r_regs[w_decode_rs2_idx]);
+                                                end
                                         end
 
                                     // or
                                     17'b00000001100110011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    r_regs[w_decode_rd_idx] <= r_regs[w_decode_rs1_idx] | r_regs[w_decode_rs2_idx];
+                                                end
                                         end
 
                                     // and
                                     17'b00000001110110011:
                                         begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    r_regs[w_decode_rd_idx] <= r_regs[w_decode_rs1_idx] & r_regs[w_decode_rs2_idx];
+                                                end
                                         end
 
                                     // TODO: Unsupported Instructions
