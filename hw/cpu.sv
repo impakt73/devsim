@@ -267,37 +267,28 @@ always_ff @ (posedge i_clk)
                                     // sb
                                     17'b???????0000100011:
                                         begin
-                                            if (w_decode_rd_is_valid)
-                                                begin
-                                                    o_mem_write_en <= 1;
-                                                    o_mem_req_size <= common::mem_req_size_byte;
-                                                    o_mem_addr <= r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm };
-                                                    o_mem_data <= r_regs[w_decode_rs2_idx];
-                                                end
+                                            o_mem_write_en <= 1;
+                                            o_mem_req_size <= common::mem_req_size_byte;
+                                            o_mem_addr <= r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm };
+                                            o_mem_data <= r_regs[w_decode_rs2_idx];
                                         end
 
                                     // sh
                                     17'b???????0010100011:
                                         begin
-                                            if (w_decode_rd_is_valid)
-                                                begin
-                                                    o_mem_write_en <= 1;
-                                                    o_mem_req_size <= common::mem_req_size_half;
-                                                    o_mem_addr <= r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm };
-                                                    o_mem_data <= r_regs[w_decode_rs2_idx];
-                                                end
+                                            o_mem_write_en <= 1;
+                                            o_mem_req_size <= common::mem_req_size_half;
+                                            o_mem_addr <= r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm };
+                                            o_mem_data <= r_regs[w_decode_rs2_idx];
                                         end
 
                                     // sw
                                     17'b???????0100100011:
                                         begin
-                                            if (w_decode_rd_is_valid)
-                                                begin
-                                                    o_mem_write_en <= 1;
-                                                    o_mem_req_size <= common::mem_req_size_word;
-                                                    o_mem_addr <= r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm };
-                                                    o_mem_data <= r_regs[w_decode_rs2_idx];
-                                                end
+                                            o_mem_write_en <= 1;
+                                            o_mem_req_size <= common::mem_req_size_word;
+                                            o_mem_addr <= r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm };
+                                            o_mem_data <= r_regs[w_decode_rs2_idx];
                                         end
 
                                     // addi
