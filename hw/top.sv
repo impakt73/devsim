@@ -256,7 +256,6 @@ always_ff @ (posedge i_clk)
                         end
                         else if (w_is_data_available && r_in_fifo_read)
                             begin
-                                //r_cmd_buf <= (r_cmd_buf << 8) | { 24'b0, w_in_fifo_output };
                                 case (r_cmd_buf_byte_counter)
                                     0: r_cmd_buf[7:0] <= w_in_fifo_output;
                                     1: r_cmd_buf[15:8] <= w_in_fifo_output;
