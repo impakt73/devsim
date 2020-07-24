@@ -1,17 +1,20 @@
+`include "common.sv"
+
 module cpu
 (
-    input  logic i_clk,
-    input  logic i_rst,
+    input  logic                i_clk,
+    input  logic                i_rst,
 
-    input  logic i_enable,
+    input  logic                i_enable,
 
-    output logic        o_mem_write_en,
-    output logic [31:0] o_mem_addr,
-    output logic [31:0] o_mem_data,
+    output logic                o_mem_write_en,
+    output common::mem_req_size o_mem_req_size,
+    output logic [31:0]         o_mem_addr,
+    output logic [31:0]         o_mem_data,
 
-    input  logic [31:0] i_mem_data,
+    input  logic [31:0]         i_mem_data,
 
-    output logic o_is_halted
+    output logic                o_is_halted
 );
 
 logic [31:0] r_pc;
@@ -76,6 +79,7 @@ always_ff @ (posedge i_clk)
             r_inst_buf <= 0;
 
             o_mem_write_en <= 0;
+            o_mem_req_size <= common::mem_req_size_word;
             o_mem_addr <= 0;
         end
     else if (i_enable)
@@ -92,6 +96,7 @@ always_ff @ (posedge i_clk)
                 cpu_state_fetch:
                     begin
                         o_mem_write_en <= 0;
+                        o_mem_req_size <= common::mem_req_size_word;
                         o_mem_addr <= r_pc;
 
                         r_state <= cpu_state_fetch_wait;
@@ -218,18 +223,41 @@ always_ff @ (posedge i_clk)
 
                                     // lb
                                     17'b???????0000000011,
+                                    // lbu
+                                    17'b???????1000000011:
+                                        begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    o_mem_write_en <= 0;
+                                                    o_mem_req_size <= common::mem_req_size_byte;
+                                                    o_mem_addr <= r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm };
+
+                                                    r_state <= cpu_state_memory_load_wait;
+                                                end
+                                        end
+
                                     // lh
                                     17'b???????0010000011,
-                                    // lw
-                                    17'b???????0100000011,
-                                    // lbu
-                                    17'b???????1000000011,
                                     // lhu
                                     17'b???????1010000011:
                                         begin
                                             if (w_decode_rd_is_valid)
                                                 begin
                                                     o_mem_write_en <= 0;
+                                                    o_mem_req_size <= common::mem_req_size_half;
+                                                    o_mem_addr <= r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm };
+
+                                                    r_state <= cpu_state_memory_load_wait;
+                                                end
+                                        end
+
+                                    // lw
+                                    17'b???????0100000011:
+                                        begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    o_mem_write_en <= 0;
+                                                    o_mem_req_size <= common::mem_req_size_word;
                                                     o_mem_addr <= r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm };
 
                                                     r_state <= cpu_state_memory_load_wait;
@@ -237,11 +265,27 @@ always_ff @ (posedge i_clk)
                                         end
 
                                     // sb
-                                    17'b???????0000100011,
+                                    17'b???????0000100011:
+                                        begin
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    o_mem_write_en <= 1;
+                                                    o_mem_req_size <= common::mem_req_size_byte;
+                                                    o_mem_addr <= r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm };
+                                                    o_mem_data <= r_regs[w_decode_rs2_idx];
+                                                end
+                                        end
+
                                     // sh
                                     17'b???????0010100011:
                                         begin
-                                            // TODO: Partial stores are currently unsupported because we need a memory write mask
+                                            if (w_decode_rd_is_valid)
+                                                begin
+                                                    o_mem_write_en <= 1;
+                                                    o_mem_req_size <= common::mem_req_size_half;
+                                                    o_mem_addr <= r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm };
+                                                    o_mem_data <= r_regs[w_decode_rs2_idx];
+                                                end
                                         end
 
                                     // sw
@@ -250,6 +294,7 @@ always_ff @ (posedge i_clk)
                                             if (w_decode_rd_is_valid)
                                                 begin
                                                     o_mem_write_en <= 1;
+                                                    o_mem_req_size <= common::mem_req_size_word;
                                                     o_mem_addr <= r_regs[w_decode_rs1_idx] + { { 12 { w_decode_imm[19] } }, w_decode_imm };
                                                     o_mem_data <= r_regs[w_decode_rs2_idx];
                                                 end
@@ -482,22 +527,11 @@ always_ff @ (posedge i_clk)
                 cpu_state_memory_load_execute:
                     begin
                         casez({ w_decode_func, w_decode_op })
+
                             // lb
                             17'b???????0000000011:
                                 begin
                                     r_regs[w_decode_rd_idx] <= { { 24 { i_mem_data[7] } }, i_mem_data[7:0] };
-                                end
-
-                            // lh
-                            17'b???????0010000011:
-                                begin
-                                    r_regs[w_decode_rd_idx] <= { { 16 { i_mem_data[15] } }, i_mem_data[15:0] };
-                                end
-
-                            // lw
-                            17'b???????0100000011:
-                                begin
-                                    r_regs[w_decode_rd_idx] <= i_mem_data[31:0];
                                 end
 
                             // lbu
@@ -506,11 +540,24 @@ always_ff @ (posedge i_clk)
                                     r_regs[w_decode_rd_idx] <= { 24'b0, i_mem_data[7:0] };
                                 end
 
+                            // lh
+                            17'b???????0010000011:
+                                begin
+                                    r_regs[w_decode_rd_idx] <= { { 16 { i_mem_data[15] } }, i_mem_data[15:0] };
+                                end
+
                             // lhu
                             17'b???????1010000011:
                                 begin
                                     r_regs[w_decode_rd_idx] <= { 16'b0, i_mem_data[15:0] };
                                 end
+
+                            // lw
+                            17'b???????0100000011:
+                                begin
+                                    r_regs[w_decode_rd_idx] <= i_mem_data[31:0];
+                                end
+
                         endcase
 
                         r_state <= cpu_state_fetch;

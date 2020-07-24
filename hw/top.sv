@@ -1,3 +1,5 @@
+`include "common.sv"
+
 module top
 (
     input  logic i_clk,
@@ -107,12 +109,13 @@ enum bit[3:0]
 
 logic [7:0] r_mem[16383:0];
 
-logic r_cpu_en;
-logic w_cpu_mem_write_en;
-logic [31:0] w_cpu_mem_addr_out;
-logic [31:0] w_cpu_mem_data_out;
-logic [31:0] r_cpu_mem_data_in;
-logic w_cpu_is_halted;
+logic                r_cpu_en;
+logic                w_cpu_mem_write_en;
+common::mem_req_size w_cpu_mem_req_size_out;
+logic [31:0]         w_cpu_mem_addr_out;
+logic [31:0]         w_cpu_mem_data_out;
+logic [31:0]         r_cpu_mem_data_in;
+logic                w_cpu_is_halted;
 
 cpu cpu
 (
@@ -122,6 +125,7 @@ cpu cpu
     .i_enable(r_cpu_en),
 
     .o_mem_write_en(w_cpu_mem_write_en),
+    .o_mem_req_size(w_cpu_mem_req_size_out),
     .o_mem_addr(w_cpu_mem_addr_out),
     .o_mem_data(w_cpu_mem_data_out),
 
@@ -156,16 +160,43 @@ always_ff @ (posedge i_clk)
                                     end
                                 else
                                     begin
-                                        if (!w_cpu_mem_write_en)
+                                        if (w_cpu_mem_write_en)
                                             begin
-                                                r_cpu_mem_data_in <= { r_mem[w_cpu_mem_addr_out + 3], r_mem[w_cpu_mem_addr_out + 2], r_mem[w_cpu_mem_addr_out + 1], r_mem[w_cpu_mem_addr_out + 0] };
+                                                case (w_cpu_mem_req_size_out)
+                                                    common::mem_req_size_byte:
+                                                        begin
+                                                            r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
+                                                        end
+                                                    common::mem_req_size_half:
+                                                        begin
+                                                            r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
+                                                            r_mem[w_cpu_mem_addr_out + 1] <= w_cpu_mem_data_out[15:8];
+                                                        end
+                                                    common::mem_req_size_word:
+                                                        begin
+                                                            r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
+                                                            r_mem[w_cpu_mem_addr_out + 1] <= w_cpu_mem_data_out[15:8];
+                                                            r_mem[w_cpu_mem_addr_out + 2] <= w_cpu_mem_data_out[23:16];
+                                                            r_mem[w_cpu_mem_addr_out + 3] <= w_cpu_mem_data_out[31:24];
+                                                        end
+                                                endcase
                                             end
                                         else
                                             begin
-                                                r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
-                                                r_mem[w_cpu_mem_addr_out + 1] <= w_cpu_mem_data_out[15:8];
-                                                r_mem[w_cpu_mem_addr_out + 2] <= w_cpu_mem_data_out[23:16];
-                                                r_mem[w_cpu_mem_addr_out + 3] <= w_cpu_mem_data_out[31:24];
+                                                case (w_cpu_mem_req_size_out)
+                                                    common::mem_req_size_byte:
+                                                        begin
+                                                            r_cpu_mem_data_in <= { 24'b0, r_mem[w_cpu_mem_addr_out + 0] };
+                                                        end
+                                                    common::mem_req_size_half:
+                                                        begin
+                                                            r_cpu_mem_data_in <= { 16'b0, r_mem[w_cpu_mem_addr_out + 1], r_mem[w_cpu_mem_addr_out + 0] };
+                                                        end
+                                                    common::mem_req_size_word:
+                                                        begin
+                                                            r_cpu_mem_data_in <= { r_mem[w_cpu_mem_addr_out + 3], r_mem[w_cpu_mem_addr_out + 2], r_mem[w_cpu_mem_addr_out + 1], r_mem[w_cpu_mem_addr_out + 0] };
+                                                        end
+                                                endcase
                                             end
                                     end
                             end
