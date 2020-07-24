@@ -162,24 +162,31 @@ always_ff @ (posedge i_clk)
                                     begin
                                         if (w_cpu_mem_write_en)
                                             begin
-                                                case (w_cpu_mem_req_size_out)
-                                                    common::mem_req_size_byte:
-                                                        begin
-                                                            r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
-                                                        end
-                                                    common::mem_req_size_half:
-                                                        begin
-                                                            r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
-                                                            r_mem[w_cpu_mem_addr_out + 1] <= w_cpu_mem_data_out[15:8];
-                                                        end
-                                                    common::mem_req_size_word:
-                                                        begin
-                                                            r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
-                                                            r_mem[w_cpu_mem_addr_out + 1] <= w_cpu_mem_data_out[15:8];
-                                                            r_mem[w_cpu_mem_addr_out + 2] <= w_cpu_mem_data_out[23:16];
-                                                            r_mem[w_cpu_mem_addr_out + 3] <= w_cpu_mem_data_out[31:24];
-                                                        end
-                                                endcase
+                                                if (w_cpu_mem_addr_out < 16384)
+                                                    begin
+                                                        case (w_cpu_mem_req_size_out)
+                                                            common::mem_req_size_byte:
+                                                                begin
+                                                                    r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
+                                                                end
+                                                            common::mem_req_size_half:
+                                                                begin
+                                                                    r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
+                                                                    r_mem[w_cpu_mem_addr_out + 1] <= w_cpu_mem_data_out[15:8];
+                                                                end
+                                                            common::mem_req_size_word:
+                                                                begin
+                                                                    r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
+                                                                    r_mem[w_cpu_mem_addr_out + 1] <= w_cpu_mem_data_out[15:8];
+                                                                    r_mem[w_cpu_mem_addr_out + 2] <= w_cpu_mem_data_out[23:16];
+                                                                    r_mem[w_cpu_mem_addr_out + 3] <= w_cpu_mem_data_out[31:24];
+                                                                end
+                                                        endcase
+                                                    end
+                                                else
+                                                    begin
+                                                        r_cpu_en <= 0;
+                                                    end
                                             end
                                         else
                                             begin
