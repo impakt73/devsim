@@ -1,14 +1,14 @@
 use goblin::Object;
 use gumdrop::Options;
+use std::cmp;
+use std::collections::VecDeque;
 use std::error;
 use std::ffi::c_void;
 use std::fs;
-use std::path::Path;
-use std::ptr;
-use std::collections::VecDeque;
 use std::io;
 use std::io::{Read, Write};
-use std::cmp;
+use std::path::Path;
+use std::ptr;
 
 type ProtoBridgeHandle = *mut c_void;
 
@@ -71,7 +71,7 @@ impl ProtoBridge {
             handle,
             clocks: 0,
             input_queue: VecDeque::new(),
-            output_queue: VecDeque::new()
+            output_queue: VecDeque::new(),
         }
     }
 
@@ -142,7 +142,8 @@ impl ProtoBridge {
 
     // Command helper functions
     fn write_cmd(&mut self, cmd: u32) {
-        self.write_all(&cmd.to_le_bytes()).expect("Failed to write command into internal buffer!");
+        self.write_all(&cmd.to_le_bytes())
+            .expect("Failed to write command into internal buffer!");
     }
 
     fn cmd_read_bytes(&mut self, addr: u16, size: u16) {
@@ -164,17 +165,19 @@ impl ProtoBridge {
     // High level functions
     fn write_bytes(&mut self, addr: u16, buf: &[u8]) {
         self.cmd_write_bytes(addr, buf.len() as u16);
-        self.write_all(buf).expect("Failed to write bytes into internal buffer!");
+        self.write_all(buf)
+            .expect("Failed to write bytes into internal buffer!");
     }
 
     fn read_bytes(&mut self, addr: u16, buf: &mut [u8], max_wait_cycles: usize) -> Result<()> {
         self.cmd_read_bytes(addr, buf.len() as u16);
         match self.wait_for_output(buf.len(), max_wait_cycles) {
             Ok(_) => {
-                self.read_exact(buf).expect("Failed to read bytes from internal buffer after waiting!");
+                self.read_exact(buf)
+                    .expect("Failed to read bytes from internal buffer after waiting!");
                 Ok(())
             }
-            Err(err) => Err(err)
+            Err(err) => Err(err),
         }
     }
 
@@ -183,10 +186,11 @@ impl ProtoBridge {
         match self.wait_for_output(1, max_wait_cycles) {
             Ok(_) => {
                 let mut buf = [0];
-                self.read_exact(&mut buf).expect("Failed to read bytes from internal buffer after waiting!");
+                self.read_exact(&mut buf)
+                    .expect("Failed to read bytes from internal buffer after waiting!");
                 Ok(buf[0])
             }
-            Err(err) => Err(err)
+            Err(err) => Err(err),
         }
     }
 }
@@ -215,7 +219,9 @@ mod tests {
 
         let mut output_data = vec![0; memory_size];
 
-        assert!(bridge.read_bytes(0, &mut output_data, WAIT_INFINITE_CYCLES).is_ok());
+        assert!(bridge
+            .read_bytes(0, &mut output_data, WAIT_INFINITE_CYCLES)
+            .is_ok());
 
         for i in 0..memory_size {
             assert_eq!(input_data[i], output_data[i]);
@@ -252,7 +258,8 @@ fn main() -> Result<()> {
 
                 println!(
                     "Uploaded {} byte loadable program segment to address {:#06x} in device memory",
-                    program_data.len(), program_addr
+                    program_data.len(),
+                    program_addr
                 );
             }
         }
@@ -292,23 +299,26 @@ fn main() -> Result<()> {
 
         if stopped {
             println!("Execution stopped due to device halt");
-        }
-        else {
+        } else {
             println!("Execution stopped due to timeout");
         }
 
         let mut image_data = vec![0; 256];
-        bridge.read_bytes(0x1F00, &mut image_data, WAIT_INFINITE_CYCLES).expect("Failed to read image data back from device!");
+        bridge
+            .read_bytes(0x1F00, &mut image_data, WAIT_INFINITE_CYCLES)
+            .expect("Failed to read image data back from device!");
 
-        let image: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> = image::ImageBuffer::from_fn(16, 16, |x, y| {
-            let idx = y * 16 + x;
-            let color = image_data[idx as usize];
+        let image: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> =
+            image::ImageBuffer::from_fn(16, 16, |x, y| {
+                let idx = y * 16 + x;
+                let color = image_data[idx as usize];
 
-            image::Rgb([color, color, color])
-        });
+                image::Rgb([color, color, color])
+            });
 
-        image.save("image.png").expect("Failed to write image output!");
-
+        image
+            .save("image.png")
+            .expect("Failed to write image output!");
     } else {
         eprint!("Invalid elf input file!");
     }
