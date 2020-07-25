@@ -165,7 +165,7 @@ mod tests {
     fn memory_test() {
         let memory_size = 16384;
 
-        let bridge = ProtoBridge::new();
+        let mut bridge = ProtoBridge::new();
 
         let mut input_data = Vec::new();
         for i in 0..memory_size {
@@ -176,7 +176,7 @@ mod tests {
 
         let mut output_data = vec![0; memory_size];
 
-        assert_eq!(bridge.read_bytes(0, &mut output_data, 16), memory_size);
+        assert_eq!(bridge._read_bytes(0, &mut output_data, 16), memory_size);
 
         for i in 0..memory_size {
             assert_eq!(input_data[i], output_data[i]);
