@@ -145,7 +145,7 @@ impl ProtoBridge {
         self.write_all(&cmd.to_le_bytes()).expect("Failed to write command into internal buffer!");
     }
 
-    fn _cmd_read_bytes(&mut self, addr: u16, size: u16) {
+    fn cmd_read_bytes(&mut self, addr: u16, size: u16) {
         self.write_cmd(Self::build_cmd(CMD_ID_READ, addr, size));
     }
 
@@ -167,8 +167,8 @@ impl ProtoBridge {
         self.write_all(buf).expect("Failed to write bytes into internal buffer!");
     }
 
-    fn _read_bytes(&mut self, addr: u16, buf: &mut [u8], max_wait_cycles: usize) -> Result<()> {
-        self._cmd_read_bytes(addr, buf.len() as u16);
+    fn read_bytes(&mut self, addr: u16, buf: &mut [u8], max_wait_cycles: usize) -> Result<()> {
+        self.cmd_read_bytes(addr, buf.len() as u16);
         match self.wait_for_output(buf.len(), max_wait_cycles) {
             Ok(_) => {
                 self.read_exact(buf).expect("Failed to read bytes from internal buffer after waiting!");
@@ -215,7 +215,7 @@ mod tests {
 
         let mut output_data = vec![0; memory_size];
 
-        assert!(bridge._read_bytes(0, &mut output_data, WAIT_INFINITE_CYCLES).is_ok());
+        assert!(bridge.read_bytes(0, &mut output_data, WAIT_INFINITE_CYCLES).is_ok());
 
         for i in 0..memory_size {
             assert_eq!(input_data[i], output_data[i]);
@@ -296,6 +296,18 @@ fn main() -> Result<()> {
         else {
             println!("Execution stopped due to timeout");
         }
+
+        let mut image_data = vec![0; 256];
+        bridge.read_bytes(0x1F00, &mut image_data, WAIT_INFINITE_CYCLES).expect("Failed to read image data back from device!");
+
+        let image: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> = image::ImageBuffer::from_fn(16, 16, |x, y| {
+            let idx = y * 16 + x;
+            let color = image_data[idx as usize];
+
+            image::Rgb([color, color, color])
+        });
+
+        image.save("image.png").expect("Failed to write image output!");
 
     } else {
         eprint!("Invalid elf input file!");
