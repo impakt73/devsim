@@ -174,7 +174,7 @@ struct SimOptions {
     #[options(help = "print help message")]
     help: bool,
 
-    #[options(help = "path to an elf file to execute")]
+    #[options(free, required, help = "path to an elf file to execute")]
     elf_path: String,
 }
 
