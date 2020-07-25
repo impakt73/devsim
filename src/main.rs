@@ -22,8 +22,10 @@ extern "C" {
     fn ClockProtoBridge(handle: ProtoBridgeHandle, p_input: *const u8, p_output: *mut u8);
 }
 
-#[repr(transparent)]
-struct ProtoBridge(ProtoBridgeHandle);
+struct ProtoBridge {
+    handle: ProtoBridgeHandle,
+    clocks: u64,
+}
 
 const CMD_ID_READ: u8 = 1;
 const CMD_ID_WRITE: u8 = 2;
@@ -36,7 +38,14 @@ impl ProtoBridge {
         unsafe {
             CreateProtoBridge(&mut handle);
         }
-        ProtoBridge(handle)
+        ProtoBridge {
+            handle,
+            clocks: 0
+        }
+    }
+
+    fn clocks(&self) -> u64 {
+        self.clocks
     }
 
     fn build_cmd(id: u8, addr: u16, size: u16) -> u32 {
@@ -49,16 +58,22 @@ impl ProtoBridge {
             | (data as u32 & 0x3fff)
     }
 
-    fn send_cmd(&self, cmd: u32) -> bool {
+    unsafe fn clock(&mut self, p_in: *const u8, p_out: *mut u8) {
+        self.clocks += 1;
+
+        ClockProtoBridge(self.handle, p_in, p_out);
+    }
+
+    fn send_cmd(&mut self, cmd: u32) -> bool {
         let mut ok = true;
         for byte_index in 0..4 {
             unsafe {
-                let status = QueryProtoBridgeDataStatus(self.0);
+                let status = QueryProtoBridgeDataStatus(self.handle);
                 if status.is_input_full == 0 {
                     let byte_val = ((cmd >> (8 * byte_index)) & 0xff) as u8;
-                    ClockProtoBridge(self.0, &byte_val, ptr::null_mut());
+                    self.clock(&byte_val, ptr::null_mut());
                 } else {
-                    ClockProtoBridge(self.0, ptr::null(), ptr::null_mut());
+                    self.clock(ptr::null(), ptr::null_mut());
                     ok = false;
                     break;
                 }
@@ -67,7 +82,7 @@ impl ProtoBridge {
         ok
     }
 
-    fn read_bytes(&self, addr: u16, buf: &mut [u8], max_wait_cycles: u32) -> usize {
+    fn _read_bytes(&mut self, addr: u16, buf: &mut [u8], max_wait_cycles: u32) -> usize {
         let mut num_wait_cycles = 0;
         let mut bytes_read = 0;
 
@@ -75,12 +90,12 @@ impl ProtoBridge {
         if self.send_cmd(cmd) {
             while bytes_read < buf.len() {
                 unsafe {
-                    let status = QueryProtoBridgeDataStatus(self.0);
+                    let status = QueryProtoBridgeDataStatus(self.handle);
                     if status.is_output_empty == 0 {
-                        ClockProtoBridge(self.0, ptr::null(), &mut buf[bytes_read]);
+                        self.clock(ptr::null(), &mut buf[bytes_read]);
                         bytes_read += 1
                     } else {
-                        ClockProtoBridge(self.0, ptr::null(), ptr::null_mut());
+                        self.clock(ptr::null(), ptr::null_mut());
                         num_wait_cycles += 1;
 
                         if num_wait_cycles >= max_wait_cycles {
@@ -93,17 +108,17 @@ impl ProtoBridge {
         bytes_read as usize
     }
 
-    fn read_reg(&self, idx: u16) -> Option<u8> {
+    fn read_reg(&mut self, idx: u16) -> Option<u8> {
         let cmd = Self::build_reg_cmd(CMD_ID_READ, idx, 0);
         if self.send_cmd(cmd) {
             unsafe {
-                let status = QueryProtoBridgeDataStatus(self.0);
+                let status = QueryProtoBridgeDataStatus(self.handle);
                 if status.is_output_empty == 0 {
                     let mut val = 0;
-                    ClockProtoBridge(self.0, ptr::null(), &mut val);
+                    self.clock(ptr::null(), &mut val);
                     return Some(val);
                 } else {
-                    ClockProtoBridge(self.0, ptr::null(), ptr::null_mut());
+                    self.clock(ptr::null(), ptr::null_mut());
                 }
             }
         }
@@ -111,16 +126,16 @@ impl ProtoBridge {
         None
     }
 
-    fn write_bytes(&self, addr: u16, buf: &[u8]) -> usize {
+    fn write_bytes(&mut self, addr: u16, buf: &[u8]) -> usize {
         let mut bytes_written = 0;
 
         let cmd = Self::build_cmd(CMD_ID_WRITE, addr, buf.len() as u16);
         if self.send_cmd(cmd) {
             while bytes_written < buf.len() {
                 unsafe {
-                    let status = QueryProtoBridgeDataStatus(self.0);
+                    let status = QueryProtoBridgeDataStatus(self.handle);
                     if status.is_input_full == 0 {
-                        ClockProtoBridge(self.0, &buf[bytes_written], ptr::null_mut());
+                        self.clock(&buf[bytes_written], ptr::null_mut());
                         bytes_written += 1
                     } else {
                         break;
@@ -131,7 +146,7 @@ impl ProtoBridge {
         bytes_written as usize
     }
 
-    fn write_reg(&self, idx: u16, data: u8) -> bool {
+    fn write_reg(&mut self, idx: u16, data: u8) -> bool {
         let cmd = Self::build_reg_cmd(CMD_ID_WRITE, idx, data);
         self.send_cmd(cmd)
     }
@@ -139,7 +154,7 @@ impl ProtoBridge {
 
 impl Drop for ProtoBridge {
     fn drop(&mut self) {
-        unsafe { DestroyProtoBridge(self.0) }
+        unsafe { DestroyProtoBridge(self.handle) }
     }
 }
 
@@ -186,7 +201,7 @@ fn main() -> Result<()> {
     let path = Path::new(&opts.elf_path);
     let buffer = fs::read(path)?;
     if let Object::Elf(elf) = Object::parse(&buffer)? {
-        let bridge = ProtoBridge::new();
+        let mut bridge = ProtoBridge::new();
 
         for header in elf.program_headers {
             if header.p_type == goblin::elf::program_header::PT_LOAD {
@@ -205,22 +220,34 @@ fn main() -> Result<()> {
 
         let ok = bridge.write_reg(REG_IDX_DEV_EN, 1);
         assert!(ok);
-        let mut current_cycle = 0;
-        let max_cycles = 1024;
-        loop {
+
+        const MAX_TRIES: u64 = 4096;
+
+        let mut progress = pbr::ProgressBar::new(MAX_TRIES);
+        let mut stopped = false;
+
+        for _ in 0..MAX_TRIES {
+            progress.set(bridge.clocks());
+
             let device_enabled = bridge.read_reg(REG_IDX_DEV_EN);
-            if device_enabled.is_some() && device_enabled.unwrap() == 0 {
-                println!("Device stopped!");
-                break;
-            } else {
-                println!("Device still running...");
-            }
-            current_cycle += 1;
-            if current_cycle >= max_cycles {
-                println!("Breaking out of execution loop due to timeout");
-                break;
+            if let Some(enabled) = device_enabled {
+                if enabled == 0 {
+                    progress.total = bridge.clocks();
+                    stopped = true;
+
+                    println!("Device stopped!");
+                    break;
+                }
             }
         }
+
+        progress.total = bridge.clocks();
+        progress.finish_println(&format!("Clocks: {}\n", bridge.clocks()));
+
+        if stopped {
+            println!("Execution stopped due to timeout");
+        }
+
     } else {
         eprint!("Invalid elf input file!");
     }
