@@ -382,7 +382,7 @@ always_ff @ (posedge i_clk)
                                         begin
                                             if (w_decode_rd_is_valid)
                                                 begin
-                                                    r_regs[w_decode_rd_idx] <= $signed(r_regs[w_decode_rs1_idx]) >> $signed({ { 12 { w_decode_imm[19] } }, w_decode_imm });
+                                                    r_regs[w_decode_rd_idx] <= $signed(r_regs[w_decode_rs1_idx]) >>> $signed({ { 12 { w_decode_imm[19] } }, w_decode_imm });
                                                 end
                                         end
 
@@ -468,7 +468,7 @@ always_ff @ (posedge i_clk)
                                         begin
                                             if (w_decode_rd_is_valid)
                                                 begin
-                                                    r_regs[w_decode_rd_idx] <= $signed(r_regs[w_decode_rs1_idx]) >> $signed(r_regs[w_decode_rs2_idx]);
+                                                    r_regs[w_decode_rd_idx] <= $signed(r_regs[w_decode_rs1_idx]) >>> $signed(r_regs[w_decode_rs2_idx]);
                                                 end
                                         end
 
