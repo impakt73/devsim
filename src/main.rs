@@ -5,8 +5,14 @@ use std::ffi::c_void;
 use std::fs;
 use std::path::Path;
 use std::ptr;
+use std::collections::VecDeque;
+use std::io;
+use std::io::{Read, Write};
+use std::cmp;
 
 type ProtoBridgeHandle = *mut c_void;
+
+const WAIT_INFINITE_CYCLES: usize = 0xffffffff;
 
 #[repr(C)]
 struct DataStatus {
@@ -25,12 +31,35 @@ extern "C" {
 struct ProtoBridge {
     handle: ProtoBridgeHandle,
     clocks: u64,
+    input_queue: VecDeque<u8>,
+    output_queue: VecDeque<u8>,
 }
 
 const CMD_ID_READ: u8 = 1;
 const CMD_ID_WRITE: u8 = 2;
 
 const REG_IDX_DEV_EN: u16 = 0;
+
+impl io::Read for ProtoBridge {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let bytes_read = cmp::min(self.output_queue.len(), buf.len());
+        for (index, byte) in self.output_queue.drain(0..bytes_read).enumerate() {
+            buf[index] = byte;
+        }
+        Ok(bytes_read)
+    }
+}
+
+impl io::Write for ProtoBridge {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.input_queue.extend(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 impl ProtoBridge {
     fn new() -> Self {
@@ -40,7 +69,9 @@ impl ProtoBridge {
         }
         ProtoBridge {
             handle,
-            clocks: 0
+            clocks: 0,
+            input_queue: VecDeque::new(),
+            output_queue: VecDeque::new()
         }
     }
 
@@ -48,6 +79,7 @@ impl ProtoBridge {
         self.clocks
     }
 
+    // Internal helper functions
     fn build_cmd(id: u8, addr: u16, size: u16) -> u32 {
         ((id as u32 & 0xf) << 28) | ((addr as u32 & 0x3fff) << 14) | ((size - 1) as u32 & 0x3fff)
     }
@@ -58,97 +90,104 @@ impl ProtoBridge {
             | (data as u32 & 0x3fff)
     }
 
-    unsafe fn clock(&mut self, p_in: *const u8, p_out: *mut u8) {
-        self.clocks += 1;
+    fn clock(&mut self) {
+        let status = unsafe { QueryProtoBridgeDataStatus(self.handle) };
 
-        ClockProtoBridge(self.handle, p_in, p_out);
+        let mut p_in = ptr::null();
+        let mut p_out = ptr::null_mut();
+
+        if status.is_input_full == 0 {
+            if let Some(input) = self.input_queue.front() {
+                p_in = input;
+            }
+        }
+
+        let mut output = 0;
+        if status.is_output_empty == 0 {
+            p_out = &mut output;
+        }
+
+        unsafe {
+            ClockProtoBridge(self.handle, p_in, p_out);
+        }
+
+        if !p_in.is_null() {
+            self.input_queue.pop_front();
+        }
+
+        if !p_out.is_null() {
+            self.output_queue.push_back(output);
+        }
+
+        self.clocks += 1;
     }
 
-    fn send_cmd(&mut self, cmd: u32) -> bool {
-        let mut ok = true;
-        for byte_index in 0..4 {
-            unsafe {
-                let status = QueryProtoBridgeDataStatus(self.handle);
-                if status.is_input_full == 0 {
-                    let byte_val = ((cmd >> (8 * byte_index)) & 0xff) as u8;
-                    self.clock(&byte_val, ptr::null_mut());
-                } else {
-                    self.clock(ptr::null(), ptr::null_mut());
-                    ok = false;
+    fn wait_for_output(&mut self, num_bytes: usize, max_wait_cycles: usize) -> Result<usize> {
+        // If we don't have enough data, we'll attempt to clock the device until we have enough.
+        if self.output_queue.len() < num_bytes {
+            for _wait_cycle_idx in 0..max_wait_cycles {
+                self.clock();
+                if self.output_queue.len() >= num_bytes {
                     break;
                 }
             }
         }
-        ok
-    }
 
-    fn _read_bytes(&mut self, addr: u16, buf: &mut [u8], max_wait_cycles: u32) -> usize {
-        let mut num_wait_cycles = 0;
-        let mut bytes_read = 0;
-
-        let cmd = Self::build_cmd(CMD_ID_READ, addr, buf.len() as u16);
-        if self.send_cmd(cmd) {
-            while bytes_read < buf.len() {
-                unsafe {
-                    let status = QueryProtoBridgeDataStatus(self.handle);
-                    if status.is_output_empty == 0 {
-                        self.clock(ptr::null(), &mut buf[bytes_read]);
-                        bytes_read += 1
-                    } else {
-                        self.clock(ptr::null(), ptr::null_mut());
-                        num_wait_cycles += 1;
-
-                        if num_wait_cycles >= max_wait_cycles {
-                            break;
-                        }
-                    }
-                }
-            }
+        if self.output_queue.len() >= num_bytes {
+            Ok(self.output_queue.len())
+        } else {
+            Err(io::Error::from(io::ErrorKind::TimedOut).into())
         }
-        bytes_read as usize
     }
 
-    fn read_reg(&mut self, idx: u16) -> Option<u8> {
-        let cmd = Self::build_reg_cmd(CMD_ID_READ, idx, 0);
-        if self.send_cmd(cmd) {
-            unsafe {
-                let status = QueryProtoBridgeDataStatus(self.handle);
-                if status.is_output_empty == 0 {
-                    let mut val = 0;
-                    self.clock(ptr::null(), &mut val);
-                    return Some(val);
-                } else {
-                    self.clock(ptr::null(), ptr::null_mut());
-                }
+    // Command helper functions
+    fn write_cmd(&mut self, cmd: u32) {
+        self.write_all(&cmd.to_le_bytes()).expect("Failed to write command into internal buffer!");
+    }
+
+    fn _cmd_read_bytes(&mut self, addr: u16, size: u16) {
+        self.write_cmd(Self::build_cmd(CMD_ID_READ, addr, size));
+    }
+
+    fn cmd_read_reg(&mut self, idx: u16) {
+        self.write_cmd(Self::build_reg_cmd(CMD_ID_READ, idx, 0));
+    }
+
+    fn cmd_write_bytes(&mut self, addr: u16, size: u16) {
+        self.write_cmd(Self::build_cmd(CMD_ID_WRITE, addr, size));
+    }
+
+    fn cmd_write_reg(&mut self, idx: u16, data: u8) {
+        self.write_cmd(Self::build_reg_cmd(CMD_ID_WRITE, idx, data));
+    }
+
+    // High level functions
+    fn write_bytes(&mut self, addr: u16, buf: &[u8]) {
+        self.cmd_write_bytes(addr, buf.len() as u16);
+        self.write_all(buf).expect("Failed to write bytes into internal buffer!");
+    }
+
+    fn _read_bytes(&mut self, addr: u16, buf: &mut [u8], max_wait_cycles: usize) -> Result<()> {
+        self._cmd_read_bytes(addr, buf.len() as u16);
+        match self.wait_for_output(buf.len(), max_wait_cycles) {
+            Ok(_) => {
+                self.read_exact(buf).expect("Failed to read bytes from internal buffer after waiting!");
+                Ok(())
             }
+            Err(err) => Err(err)
         }
-
-        None
     }
 
-    fn write_bytes(&mut self, addr: u16, buf: &[u8]) -> usize {
-        let mut bytes_written = 0;
-
-        let cmd = Self::build_cmd(CMD_ID_WRITE, addr, buf.len() as u16);
-        if self.send_cmd(cmd) {
-            while bytes_written < buf.len() {
-                unsafe {
-                    let status = QueryProtoBridgeDataStatus(self.handle);
-                    if status.is_input_full == 0 {
-                        self.clock(&buf[bytes_written], ptr::null_mut());
-                        bytes_written += 1
-                    } else {
-                        break;
-                    }
-                }
+    fn read_reg(&mut self, idx: u16, max_wait_cycles: usize) -> Result<u8> {
+        self.cmd_read_reg(idx);
+        match self.wait_for_output(1, max_wait_cycles) {
+            Ok(_) => {
+                let mut buf = [0];
+                self.read_exact(&mut buf).expect("Failed to read bytes from internal buffer after waiting!");
+                Ok(buf[0])
             }
+            Err(err) => Err(err)
         }
-        bytes_written as usize
-    }
-
-    fn write_reg(&mut self, idx: u16, data: u8) -> bool {
-        let cmd = Self::build_reg_cmd(CMD_ID_WRITE, idx, data);
-        self.send_cmd(cmd)
     }
 }
 
@@ -172,11 +211,11 @@ mod tests {
             input_data.push(i as u8);
         }
 
-        assert_eq!(bridge.write_bytes(0, &input_data), memory_size);
+        bridge.write_bytes(0, &input_data);
 
         let mut output_data = vec![0; memory_size];
 
-        assert_eq!(bridge._read_bytes(0, &mut output_data, 16), memory_size);
+        assert!(bridge._read_bytes(0, &mut output_data, WAIT_INFINITE_CYCLES).is_ok());
 
         for i in 0..memory_size {
             assert_eq!(input_data[i], output_data[i]);
@@ -209,17 +248,17 @@ fn main() -> Result<()> {
                     &buffer[header.p_offset as usize..(header.p_offset + header.p_filesz) as usize];
                 let program_addr = header.p_paddr as u16;
 
-                let bytes_written = bridge.write_bytes(program_addr, program_data);
+                bridge.write_bytes(program_addr, program_data);
 
                 println!(
                     "Uploaded {} byte loadable program segment to address {:#06x} in device memory",
-                    bytes_written, program_addr
+                    program_data.len(), program_addr
                 );
             }
         }
 
-        let ok = bridge.write_reg(REG_IDX_DEV_EN, 1);
-        assert!(ok);
+        // Enable the device
+        bridge.cmd_write_reg(REG_IDX_DEV_EN, 1);
 
         const MAX_TRIES: u64 = 4096;
 
@@ -229,13 +268,20 @@ fn main() -> Result<()> {
         for _ in 0..MAX_TRIES {
             progress.set(bridge.clocks());
 
-            let device_enabled = bridge.read_reg(REG_IDX_DEV_EN);
-            if let Some(enabled) = device_enabled {
-                if enabled == 0 {
-                    progress.total = bridge.clocks();
-                    stopped = true;
-
-                    println!("Device stopped!");
+            // Check if the device is still executing
+            match bridge.read_reg(REG_IDX_DEV_EN, WAIT_INFINITE_CYCLES) {
+                Ok(reg) => {
+                    if reg != 0 {
+                        // Still executing...
+                    } else {
+                        // The device has halted, break out of the loop
+                        progress.total = bridge.clocks();
+                        stopped = true;
+                        break;
+                    }
+                }
+                Err(err) => {
+                    println!("Device error: {}", err);
                     break;
                 }
             }
@@ -245,6 +291,9 @@ fn main() -> Result<()> {
         progress.finish_println(&format!("Clocks: {}\n", bridge.clocks()));
 
         if stopped {
+            println!("Execution stopped due to device halt");
+        }
+        else {
             println!("Execution stopped due to timeout");
         }
 
