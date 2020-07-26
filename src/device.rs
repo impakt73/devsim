@@ -33,21 +33,28 @@ impl Device {
     /// Loads an elf into device memory from the path provided
     pub fn load_elf(&mut self, elf_path: impl AsRef<Path>) -> Result<()> {
         let buffer = fs::read(elf_path)?;
-        if let Object::Elf(elf) = Object::parse(&buffer)? {
-            for header in elf.program_headers {
-                if header.p_type == goblin::elf::program_header::PT_LOAD {
-                    let program_data = &buffer
-                        [header.p_offset as usize..(header.p_offset + header.p_filesz) as usize];
-                    let program_addr = header.p_paddr as u16;
+        match Object::parse(&buffer)? {
+            Object::Elf(elf) => {
+                for header in elf.program_headers {
+                    if header.p_type == goblin::elf::program_header::PT_LOAD {
+                        let program_data = &buffer[header.p_offset as usize
+                            ..(header.p_offset + header.p_filesz) as usize];
+                        let program_addr = header.p_paddr as u16;
 
-                    self.bridge.write_bytes(program_addr, program_data);
+                        self.bridge.write_bytes(program_addr, program_data);
 
-                    println!(
-                        "Uploaded {} byte loadable program segment to address {:#06x} in device memory",
-                        program_data.len(),
-                        program_addr
-                    );
+                        println!(
+                            "Uploaded {} byte loadable program segment to address {:#06x} in device memory",
+                            program_data.len(),
+                            program_addr
+                        );
+                    }
                 }
+            }
+            _ => {
+                return Err(
+                    goblin::error::Error::Malformed("Invalid elf specified".to_owned()).into(),
+                )
             }
         }
 
@@ -97,5 +104,11 @@ impl Device {
             .read_bytes(DEV_FB_ADDR, &mut snapshot.data, WAIT_INFINITE_CYCLES)?;
 
         Ok(snapshot)
+    }
+}
+
+impl Default for Device {
+    fn default() -> Self {
+        Self::new()
     }
 }
