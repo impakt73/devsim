@@ -5,10 +5,14 @@ authors = ["Gregory Mitrano <gregory.mitrano@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-gumdrop = "0.8"
 goblin = "0.2"
-image = "0.23"
+gumdrop = "0.8"
 pbr = "1"
+
+[dependencies.image]
+default-features = false
+features = ["png"]
+version = "0.23"
 
 [build-dependencies]
 cmake = "0.1"
