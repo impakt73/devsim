@@ -109,20 +109,18 @@ enum bit[3:0]
 
 logic [7:0] r_mem[16383:0];
 
-logic                r_cpu_en;
 logic                w_cpu_mem_write_en;
 common::mem_req_size w_cpu_mem_req_size_out;
 logic [31:0]         w_cpu_mem_addr_out;
 logic [31:0]         w_cpu_mem_data_out;
 logic [31:0]         r_cpu_mem_data_in;
-logic                w_cpu_is_halted;
+logic                r_cpu_start_signal;
+logic                w_cpu_is_idle;
 
 cpu cpu
 (
     .i_clk(i_clk),
     .i_rst(!i_rst_n),
-
-    .i_enable(r_cpu_en),
 
     .o_mem_write_en(w_cpu_mem_write_en),
     .o_mem_req_size(w_cpu_mem_req_size_out),
@@ -131,7 +129,8 @@ cpu cpu
 
     .i_mem_data(r_cpu_mem_data_in),
 
-    .o_is_halted(w_cpu_is_halted)
+    .i_start_signal(r_cpu_start_signal),
+    .o_is_idle(w_cpu_is_idle)
 );
 
 always_ff @ (posedge i_clk)
@@ -143,52 +142,54 @@ always_ff @ (posedge i_clk)
             r_dev_rst <= 0;
             r_in_fifo_read <= 0;
             r_out_fifo_write <= 0;
-            r_cpu_en <= 0;
+            r_cpu_start_signal <= 0;
         end
     else
         begin
+            // The cpu start signal should only ever be active for 1 cycle
+            if (r_cpu_start_signal)
+                begin
+                    r_cpu_start_signal <= 0;
+                end
+
             case (r_state)
                 cmd_state_idle:
                     begin
                         r_out_fifo_write <= 0;
 
-                        if (r_cpu_en)
+                        if (!w_cpu_is_idle)
                             begin
-                                if (w_cpu_is_halted)
+                                if (w_cpu_mem_write_en)
                                     begin
-                                        r_cpu_en <= 0;
+                                        if (w_cpu_mem_addr_out < 16384)
+                                            begin
+                                                case (w_cpu_mem_req_size_out)
+                                                    common::mem_req_size_byte:
+                                                        begin
+                                                            r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
+                                                        end
+                                                    common::mem_req_size_half:
+                                                        begin
+                                                            r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
+                                                            r_mem[w_cpu_mem_addr_out + 1] <= w_cpu_mem_data_out[15:8];
+                                                        end
+                                                    common::mem_req_size_word:
+                                                        begin
+                                                            r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
+                                                            r_mem[w_cpu_mem_addr_out + 1] <= w_cpu_mem_data_out[15:8];
+                                                            r_mem[w_cpu_mem_addr_out + 2] <= w_cpu_mem_data_out[23:16];
+                                                            r_mem[w_cpu_mem_addr_out + 3] <= w_cpu_mem_data_out[31:24];
+                                                        end
+                                                endcase
+                                            end
+                                        else
+                                            begin
+                                                // Drop invalid writes
+                                            end
                                     end
                                 else
                                     begin
-                                        if (w_cpu_mem_write_en)
-                                            begin
-                                                if (w_cpu_mem_addr_out < 16384)
-                                                    begin
-                                                        case (w_cpu_mem_req_size_out)
-                                                            common::mem_req_size_byte:
-                                                                begin
-                                                                    r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
-                                                                end
-                                                            common::mem_req_size_half:
-                                                                begin
-                                                                    r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
-                                                                    r_mem[w_cpu_mem_addr_out + 1] <= w_cpu_mem_data_out[15:8];
-                                                                end
-                                                            common::mem_req_size_word:
-                                                                begin
-                                                                    r_mem[w_cpu_mem_addr_out + 0] <= w_cpu_mem_data_out[7:0];
-                                                                    r_mem[w_cpu_mem_addr_out + 1] <= w_cpu_mem_data_out[15:8];
-                                                                    r_mem[w_cpu_mem_addr_out + 2] <= w_cpu_mem_data_out[23:16];
-                                                                    r_mem[w_cpu_mem_addr_out + 3] <= w_cpu_mem_data_out[31:24];
-                                                                end
-                                                        endcase
-                                                    end
-                                                else
-                                                    begin
-                                                        r_cpu_en <= 0;
-                                                    end
-                                            end
-                                        else
+                                        if (w_cpu_mem_addr_out < 16384)
                                             begin
                                                 case (w_cpu_mem_req_size_out)
                                                     common::mem_req_size_byte:
@@ -204,6 +205,11 @@ always_ff @ (posedge i_clk)
                                                             r_cpu_mem_data_in <= { r_mem[w_cpu_mem_addr_out + 3], r_mem[w_cpu_mem_addr_out + 2], r_mem[w_cpu_mem_addr_out + 1], r_mem[w_cpu_mem_addr_out + 0] };
                                                         end
                                                 endcase
+                                            end
+                                        else
+                                            begin
+                                                // Return 0 for invalid reads
+                                                r_cpu_mem_data_in <= 0;
                                             end
                                     end
                             end
@@ -221,7 +227,7 @@ always_ff @ (posedge i_clk)
                                         if (w_cmd_addr_is_reg)
                                             begin
                                                 r_state <= cmd_state_idle;
-                                                r_out_fifo_input <= { 7'd0, r_cpu_en };
+                                                r_out_fifo_input <= { 7'd0, !w_cpu_is_idle };
                                                 r_out_fifo_write <= 1;
                                             end
                                         else
@@ -237,7 +243,7 @@ always_ff @ (posedge i_clk)
                                         if (w_cmd_addr_is_reg)
                                             begin
                                                 r_state <= cmd_state_idle;
-                                                r_cpu_en <= w_cmd_reg_write_data[0];
+                                                r_cpu_start_signal <= w_cmd_reg_write_data[0];
                                             end
                                         else
                                             begin

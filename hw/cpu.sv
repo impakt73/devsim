@@ -5,8 +5,6 @@ module cpu
     input  logic                i_clk,
     input  logic                i_rst,
 
-    input  logic                i_enable,
-
     output logic                o_mem_write_en,
     output common::mem_req_size o_mem_req_size,
     output logic [31:0]         o_mem_addr,
@@ -14,7 +12,8 @@ module cpu
 
     input  logic [31:0]         i_mem_data,
 
-    output logic                o_is_halted
+    input  logic                i_start_signal,
+    output logic                o_is_idle
 );
 
 logic [31:0] r_pc;
@@ -24,14 +23,13 @@ reg [31:0] r_regs[30:0];
 
 typedef enum
 {
-    cpu_state_init,
+    cpu_state_idle,
     cpu_state_fetch,
     cpu_state_fetch_wait,
     cpu_state_decode,
     cpu_state_execute,
     cpu_state_memory_load_wait,
-    cpu_state_memory_load_execute,
-    cpu_state_halt
+    cpu_state_memory_load_execute
 } cpu_state;
 
 cpu_state r_state;
@@ -69,12 +67,12 @@ assign w_decode_rs1_idx = (w_decode_rs1 - 1);
 logic [4:0] w_decode_rs2_idx;
 assign w_decode_rs2_idx = (w_decode_rs2 - 1);
 
-assign o_is_halted = (r_state == cpu_state_halt);
+assign o_is_idle = (r_state == cpu_state_idle);
 
 always_ff @ (posedge i_clk)
     if (i_rst)
         begin
-            r_state <= cpu_state_init;
+            r_state <= cpu_state_idle;
             r_pc <= 0;
             r_inst_buf <= 0;
 
@@ -82,13 +80,13 @@ always_ff @ (posedge i_clk)
             o_mem_req_size <= common::mem_req_size_word;
             o_mem_addr <= 0;
         end
-    else if (i_enable)
+    else
         begin
             case (r_state)
-                cpu_state_init:
+                cpu_state_idle:
                     begin
-                        // Only start execution from the halted state if we're at pc 0
-                        if (r_pc == 0)
+                        // Stay in the idle state until we receive a start signal
+                        if (i_start_signal)
                             begin
                                 r_state <= cpu_state_fetch;
                             end
@@ -490,6 +488,16 @@ always_ff @ (posedge i_clk)
                                                 end
                                         end
 
+                                    // wfi
+                                    17'b00010000001110011:
+                                        begin
+                                            if ((w_decode_rd == 0) && (w_decode_rs1 == 0) && (w_decode_rs2 == 5'b00101))
+                                                begin
+                                                    // Return to the idle state when the program issue as wfi instruction
+                                                    r_state <= cpu_state_idle;
+                                                end
+                                        end
+
                                     // TODO: Unsupported Instructions
                                     //       fence
                                     //       fence.i
@@ -506,8 +514,8 @@ always_ff @ (posedge i_clk)
                             end
                         else
                             begin
-                                // Move to the halted state if we encounter an invalid instruction
-                                r_state <= cpu_state_halt;
+                                // Move to the idle state if we encounter an invalid instruction
+                                r_state <= cpu_state_idle;
                             end
                     end
                 cpu_state_memory_load_wait:
@@ -552,11 +560,6 @@ always_ff @ (posedge i_clk)
                         endcase
 
                         r_state <= cpu_state_fetch;
-                    end
-                cpu_state_halt:
-                    begin
-                        // We stay in this state until reset
-                        r_state <= cpu_state_halt;
                     end
             endcase
         end
