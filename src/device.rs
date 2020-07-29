@@ -39,7 +39,7 @@ impl Device {
                     if header.p_type == goblin::elf::program_header::PT_LOAD {
                         let program_data = &buffer[header.p_offset as usize
                             ..(header.p_offset + header.p_filesz) as usize];
-                        let program_addr = header.p_paddr as u16;
+                        let program_addr = header.p_paddr as u32;
 
                         self.bridge.write_bytes(program_addr, program_data);
 

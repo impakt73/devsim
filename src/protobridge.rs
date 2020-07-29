@@ -37,7 +37,7 @@ const CMD_ID_WRITE: u8 = 2;
 
 pub const REG_IDX_DEV_EN: u16 = 0;
 
-pub const DEV_FB_ADDR: u16 = 0x1F00;
+pub const DEV_FB_ADDR: u32 = 0x1F00;
 pub const DEV_FB_WIDTH: u32 = 16;
 pub const DEV_FB_HEIGHT: u32 = 16;
 
@@ -81,14 +81,14 @@ impl ProtoBridge {
     }
 
     // Internal helper functions
-    fn build_cmd(id: u8, addr: u16, size: u16) -> u32 {
-        ((id as u32 & 0xf) << 28) | ((addr as u32 & 0x3fff) << 14) | ((size - 1) as u32 & 0x3fff)
+    fn build_cmd(id: u8, addr: u32, size: u32) -> u64 {
+        ((id as u64 & 0xf) << 60) | ((addr as u64 & 0x3fffffff) << 30) | (size as u64 & 0x3fffffff)
     }
 
-    fn build_reg_cmd(id: u8, idx: u16, data: u8) -> u32 {
-        ((id as u32 & 0xf) << 28)
-            | (((idx | 0x2000) as u32 & 0x3fff) << 14)
-            | (data as u32 & 0x3fff)
+    fn build_reg_cmd(id: u8, idx: u16, data: u8) -> u64 {
+        ((id as u64 & 0xf) << 60)
+            | (((idx as u64 | 0x3ffff000) & 0x3fffffff) << 30)
+            | (data as u64 & 0x3fffffff)
     }
 
     fn clock(&mut self) {
@@ -142,12 +142,12 @@ impl ProtoBridge {
     }
 
     // Command helper functions
-    fn write_cmd(&mut self, cmd: u32) {
+    fn write_cmd(&mut self, cmd: u64) {
         self.write_all(&cmd.to_le_bytes())
             .expect("Failed to write command into internal buffer!");
     }
 
-    fn cmd_read_bytes(&mut self, addr: u16, size: u16) {
+    fn cmd_read_bytes(&mut self, addr: u32, size: u32) {
         self.write_cmd(Self::build_cmd(CMD_ID_READ, addr, size));
     }
 
@@ -155,7 +155,7 @@ impl ProtoBridge {
         self.write_cmd(Self::build_reg_cmd(CMD_ID_READ, idx, 0));
     }
 
-    fn cmd_write_bytes(&mut self, addr: u16, size: u16) {
+    fn cmd_write_bytes(&mut self, addr: u32, size: u32) {
         self.write_cmd(Self::build_cmd(CMD_ID_WRITE, addr, size));
     }
 
@@ -164,14 +164,14 @@ impl ProtoBridge {
     }
 
     // High level functions
-    pub fn write_bytes(&mut self, addr: u16, buf: &[u8]) {
-        self.cmd_write_bytes(addr, buf.len() as u16);
+    pub fn write_bytes(&mut self, addr: u32, buf: &[u8]) {
+        self.cmd_write_bytes(addr, buf.len() as u32);
         self.write_all(buf)
             .expect("Failed to write bytes into internal buffer!");
     }
 
-    pub fn read_bytes(&mut self, addr: u16, buf: &mut [u8], max_wait_cycles: usize) -> Result<()> {
-        self.cmd_read_bytes(addr, buf.len() as u16);
+    pub fn read_bytes(&mut self, addr: u32, buf: &mut [u8], max_wait_cycles: usize) -> Result<()> {
+        self.cmd_read_bytes(addr, buf.len() as u32);
         match self.wait_for_output(buf.len(), max_wait_cycles) {
             Ok(_) => {
                 self.read_exact(buf)

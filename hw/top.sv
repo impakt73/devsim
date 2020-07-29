@@ -58,19 +58,6 @@ assign w_is_data_available = (!w_in_fifo_empty);
 logic w_is_space_available;
 assign w_is_space_available = (!w_out_fifo_full);
 
-logic [31:0] r_cmd_buf;
-
-logic [2:0] r_cmd_buf_byte_counter;
-
-logic [2:0] r_cmd_buf_byte_counter_next;
-assign r_cmd_buf_byte_counter_next = r_cmd_buf_byte_counter + 1;
-
-logic w_is_cmd_valid;
-assign w_is_cmd_valid = r_cmd_buf_byte_counter[2];
-
-logic w_is_cmd_valid_next;
-assign w_is_cmd_valid_next = r_cmd_buf_byte_counter_next[2];
-
 typedef enum
 {
     cmd_state_idle,
@@ -84,28 +71,6 @@ cmd_state r_state;
 logic r_dev_rst;
 logic w_dev_rst;
 assign w_dev_rst = !i_rst_n || r_dev_rst;
-
-logic [3:0] w_cmd_id;
-assign w_cmd_id = r_cmd_buf[31:28];
-
-logic [13:0] w_cmd_addr;
-assign w_cmd_addr = r_cmd_buf[27:14];
-
-logic [13:0] w_cmd_size;
-assign w_cmd_size = r_cmd_buf[13:0];
-
-logic w_cmd_addr_is_reg;
-assign w_cmd_addr_is_reg = r_cmd_buf[27];
-
-logic [7:0] w_cmd_reg_write_data;
-assign w_cmd_reg_write_data = r_cmd_buf[7:0];
-
-enum bit[3:0]
-{
-    cmd_id_reset,
-    cmd_id_read,
-    cmd_id_write
-} cmd_id;
 
 logic [7:0] r_mem[16383:0];
 
@@ -133,16 +98,62 @@ cpu cpu
     .o_is_idle(w_cpu_is_idle)
 );
 
+wire w_cmd_parser_data_valid;
+assign w_cmd_parser_data_valid = (r_state == cmd_state_idle) ? r_in_fifo_read : 0;
+
+wire [7:0] w_cmd_parser_data;
+assign w_cmd_parser_data = (r_state == cmd_state_idle) ? w_in_fifo_output : 0;
+
+wire           w_cmd_parser_cmd_valid;
+wire           w_cmd_parser_cmd_valid_next;
+reg            r_cmd_parser_clear_cmd;
+common::cmd_id w_cmd_parser_cmd_id;
+wire [31:0]    w_cmd_parser_cmd_addr;
+wire [31:0]    w_cmd_parser_cmd_size;
+
+cmd_parser cmd_parser
+(
+    .i_clk(i_clk),
+    .i_rst(!i_rst_n),
+
+    .i_data_valid(w_cmd_parser_data_valid),
+    .i_data(w_cmd_parser_data),
+
+    .i_clear_cmd(r_cmd_parser_clear_cmd),
+
+    .o_cmd_valid(w_cmd_parser_cmd_valid),
+    .o_cmd_valid_next(w_cmd_parser_cmd_valid_next),
+    .o_cmd_id(w_cmd_parser_cmd_id),
+    .o_cmd_addr(w_cmd_parser_cmd_addr),
+    .o_cmd_size(w_cmd_parser_cmd_size)
+);
+
+
+reg [31:0]  r_transfer_cur_addr;
+wire [31:0] w_transfer_end_addr;
+// Make sure to guard against zero sized transfers
+// TODO: We could probably move this responsibility to the parser
+assign w_transfer_end_addr = (w_cmd_parser_cmd_size > 0) ? (w_cmd_parser_cmd_addr + (w_cmd_parser_cmd_size - 1))
+                                                         : w_cmd_parser_cmd_addr;
+
+wire w_cmd_addr_is_reg;
+assign w_cmd_addr_is_reg = (w_cmd_parser_cmd_addr >= 'h3ffff000);
+
+// TODO: Add actual register addresses
+
+wire [7:0] w_cmd_reg_write_data;
+assign w_cmd_reg_write_data = w_cmd_parser_cmd_size[7:0];
+
 always_ff @ (posedge i_clk)
     if (!i_rst_n)
         begin
-            r_cmd_buf <= 0;
-            r_cmd_buf_byte_counter <= 0;
             r_state <= cmd_state_idle;
             r_dev_rst <= 0;
             r_in_fifo_read <= 0;
             r_out_fifo_write <= 0;
             r_cpu_start_signal <= 0;
+            r_transfer_cur_addr <= 0;
+            r_cmd_parser_clear_cmd <= 0;
         end
     else
         begin
@@ -156,6 +167,7 @@ always_ff @ (posedge i_clk)
                 cmd_state_idle:
                     begin
                         r_out_fifo_write <= 0;
+                        r_cmd_parser_clear_cmd <= 0;
 
                         if (!w_cpu_is_idle)
                             begin
@@ -179,6 +191,10 @@ always_ff @ (posedge i_clk)
                                                             r_mem[w_cpu_mem_addr_out + 1] <= w_cpu_mem_data_out[15:8];
                                                             r_mem[w_cpu_mem_addr_out + 2] <= w_cpu_mem_data_out[23:16];
                                                             r_mem[w_cpu_mem_addr_out + 3] <= w_cpu_mem_data_out[31:24];
+                                                        end
+                                                    default:
+                                                        begin
+                                                            // Do nothing
                                                         end
                                                 endcase
                                             end
@@ -204,6 +220,10 @@ always_ff @ (posedge i_clk)
                                                         begin
                                                             r_cpu_mem_data_in <= { r_mem[w_cpu_mem_addr_out + 3], r_mem[w_cpu_mem_addr_out + 2], r_mem[w_cpu_mem_addr_out + 1], r_mem[w_cpu_mem_addr_out + 0] };
                                                         end
+                                                    default:
+                                                        begin
+                                                            // Do nothing
+                                                        end
                                                 endcase
                                             end
                                         else
@@ -214,43 +234,41 @@ always_ff @ (posedge i_clk)
                                     end
                             end
 
-                        if (w_is_cmd_valid)
+                        if (w_cmd_parser_cmd_valid)
                             begin
-                                case (w_cmd_id)
-                                    cmd_id_reset:
+                                case (w_cmd_parser_cmd_id)
+                                    common::cmd_id_reset:
                                     begin
                                         r_state <= cmd_state_reset;
                                         r_dev_rst <= 1;
                                     end
-                                    cmd_id_read:
+                                    common::cmd_id_read:
                                     begin
                                         if (w_cmd_addr_is_reg)
                                             begin
                                                 r_state <= cmd_state_idle;
+                                                r_cmd_parser_clear_cmd <= 1;
                                                 r_out_fifo_input <= { 7'd0, !w_cpu_is_idle };
                                                 r_out_fifo_write <= 1;
                                             end
                                         else
                                             begin
                                                 r_state <= cmd_state_read;
-
-                                                // Move the end address value into the size field
-                                                r_cmd_buf[13:0] <= r_cmd_buf[27:14] + r_cmd_buf[13:0];
+                                                r_transfer_cur_addr <= w_cmd_parser_cmd_addr;
                                             end
                                     end
-                                    cmd_id_write:
+                                    common::cmd_id_write:
                                     begin
                                         if (w_cmd_addr_is_reg)
                                             begin
                                                 r_state <= cmd_state_idle;
+                                                r_cmd_parser_clear_cmd <= 1;
                                                 r_cpu_start_signal <= w_cmd_reg_write_data[0];
                                             end
                                         else
                                             begin
                                                 r_state <= cmd_state_write;
-
-                                                // Move the end address value into the size field
-                                                r_cmd_buf[13:0] <= r_cmd_buf[27:14] + r_cmd_buf[13:0];
+                                                r_transfer_cur_addr <= w_cmd_parser_cmd_addr;
 
                                                 r_in_fifo_read <= w_is_data_available;
                                             end
@@ -260,98 +278,98 @@ always_ff @ (posedge i_clk)
                                         r_state <= cmd_state_idle;
                                     end
                                 endcase
-
-                                r_cmd_buf_byte_counter[2] <= 0;
                             end
                         else if (w_is_data_available && !r_in_fifo_read)
                         begin
-                            r_in_fifo_read <= 1;
+                            r_in_fifo_read <= !r_cmd_parser_clear_cmd;
                         end
                         else if (w_is_data_available && r_in_fifo_read)
                             begin
-                                case (r_cmd_buf_byte_counter)
-                                    0: r_cmd_buf[7:0] <= w_in_fifo_output;
-                                    1: r_cmd_buf[15:8] <= w_in_fifo_output;
-                                    2: r_cmd_buf[23:16] <= w_in_fifo_output;
-                                    3: r_cmd_buf[31:24] <= w_in_fifo_output;
-                                endcase
-                                r_cmd_buf_byte_counter <= r_cmd_buf_byte_counter_next;
-                                r_in_fifo_read <= !w_is_cmd_valid_next;
+                                r_in_fifo_read <= !w_cmd_parser_cmd_valid_next;
                             end
                     end
                 cmd_state_reset:
                     begin
                         r_state <= cmd_state_idle;
+                        r_cmd_parser_clear_cmd <= 1;
                         r_dev_rst <= 0;
                     end
                 cmd_state_read:
                     begin
                         // If addr < final_addr
-                        if (r_cmd_buf[27:14] <= r_cmd_buf[13:0])
+                        if (r_transfer_cur_addr <= w_transfer_end_addr)
                             begin
                                 if (w_is_space_available)
                                     begin
                                         r_out_fifo_write <= 1;
-                                        r_out_fifo_input <= r_mem[r_cmd_buf[27:14]];
+                                        r_out_fifo_input <= r_mem[r_transfer_cur_addr];
 
                                         // If this is the final address, our operation is complete
-                                        if (r_cmd_buf[27:14] == r_cmd_buf[13:0])
+                                        if (r_transfer_cur_addr == w_transfer_end_addr)
                                             begin
                                                 r_state <= cmd_state_idle;
+                                                r_cmd_parser_clear_cmd <= 1;
                                             end
                                         else
                                             begin
-                                                r_cmd_buf[27:14] <= r_cmd_buf[27:14] + 1;
+                                                r_transfer_cur_addr <= r_transfer_cur_addr + 1;
                                             end
                                     end
                                 else
                                     // Exit the read loop if we run out of space
                                     begin
                                         r_state <= cmd_state_idle;
+                                        r_cmd_parser_clear_cmd <= 1;
                                         r_out_fifo_write <= 0;
                                     end
                             end
                         else
                             begin
                                 r_state <= cmd_state_idle;
+                                r_cmd_parser_clear_cmd <= 1;
                             end
                     end
                 cmd_state_write:
                     begin
                         // If addr < final_addr
-                        if (r_cmd_buf[27:14] <= r_cmd_buf[13:0])
+                        if (r_transfer_cur_addr <= w_transfer_end_addr)
                             begin
                                 if (w_is_data_available)
                                     begin
                                         r_in_fifo_read <= 1;
-                                        r_mem[r_cmd_buf[27:14]] <= w_in_fifo_output;
+                                        r_mem[r_transfer_cur_addr] <= w_in_fifo_output;
 
                                         // If this is the final address, our operation is complete
-                                        if (r_cmd_buf[27:14] == r_cmd_buf[13:0])
+                                        if (r_transfer_cur_addr == w_transfer_end_addr)
                                             begin
                                                 r_state <= cmd_state_idle;
+                                                r_cmd_parser_clear_cmd <= 1;
+                                                r_in_fifo_read <= 0;
                                             end
                                         else
                                             begin
-                                                r_cmd_buf[27:14] <= r_cmd_buf[27:14] + 1;
+                                                r_transfer_cur_addr <= r_transfer_cur_addr + 1;
                                             end
                                     end
                                 else
                                     // Exit the write loop if we run out of data
                                     begin
                                         r_state <= cmd_state_idle;
+                                        r_cmd_parser_clear_cmd <= 1;
                                         r_in_fifo_read <= 0;
                                     end
                             end
                         else
                             begin
                                 r_state <= cmd_state_idle;
+                                r_cmd_parser_clear_cmd <= 1;
                             end
                     end
                 default:
                     begin
                         // TODO: Just return to idle from all other states for now.
                         r_state <= cmd_state_idle;
+                        r_cmd_parser_clear_cmd <= 1;
                     end
             endcase
         end
