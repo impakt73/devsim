@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    paths-ignore:
+        - .git*
+        - scripts/**
+        - README.md
+  pull_request:
+
+jobs:
+  all-build:
+    strategy:
+      matrix:
+        platform: [ubuntu-20.04, macos-latest]
+        rust: [stable]
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: recursive
+
+      - name: Installing Verilator
+        if: ${{ startsWith(matrix.platform, 'mac') }}
+        run: brew install verilator
+
+      - name: Installing Verilator
+        if: ${{ startsWith(matrix.platform, 'ubuntu') }}
+        run: sudo apt-get install verilator
+
+      - name: rustup
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
+          components: rustfmt, clippy
+
+      - name: check cargo build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --all
+
+      - name: check cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --all
+
+      - name: check cargo fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+      - name: check cargo clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          # args: -- -D warnings
