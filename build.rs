@@ -20,4 +20,14 @@ fn main() {
         format!("{}/lib", dst.display())
     );
     println!("cargo:rustc-link-lib=static=protobridge");
+
+    // Explicitly link against C++ to resolve link issues with protobridge.
+    // This does not need to happen on Windows, but Linux and macOS both appear to need it.
+    {
+        #[cfg(target_os = "linux")]
+        println!("cargo:rustc-link-lib=dylib=stdc++");
+
+        #[cfg(target_os = "macos")]
+        println!("cargo:rustc-link-lib=dylib=c++");
+    }
 }
