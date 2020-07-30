@@ -362,7 +362,7 @@ always_ff @ (posedge i_clk)
                                         begin
                                             if (w_decode_rd_is_valid)
                                                 begin
-                                                    r_regs[w_decode_rd_idx] <= w_decode_rs1_reg_val << { { 12 { w_decode_imm[19] } }, w_decode_imm };
+                                                    r_regs[w_decode_rd_idx] <= w_decode_rs1_reg_val << w_decode_imm[4:0];
                                                 end
                                         end
 
@@ -371,7 +371,7 @@ always_ff @ (posedge i_clk)
                                         begin
                                             if (w_decode_rd_is_valid)
                                                 begin
-                                                    r_regs[w_decode_rd_idx] <= w_decode_rs1_reg_val >> { { 12 { w_decode_imm[19] } }, w_decode_imm };
+                                                    r_regs[w_decode_rd_idx] <= w_decode_rs1_reg_val >> w_decode_imm[4:0];
                                                 end
                                         end
 
@@ -380,7 +380,7 @@ always_ff @ (posedge i_clk)
                                         begin
                                             if (w_decode_rd_is_valid)
                                                 begin
-                                                    r_regs[w_decode_rd_idx] <= $signed(w_decode_rs1_reg_val) >>> $signed({ { 12 { w_decode_imm[19] } }, w_decode_imm });
+                                                    r_regs[w_decode_rd_idx] <= $signed(w_decode_rs1_reg_val) >>> $signed(w_decode_imm[4:0]);
                                                 end
                                         end
 
