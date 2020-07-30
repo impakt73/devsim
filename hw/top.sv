@@ -72,7 +72,10 @@ logic r_dev_rst;
 logic w_dev_rst;
 assign w_dev_rst = !i_rst_n || r_dev_rst;
 
-logic [7:0] r_mem[16383:0];
+// 1MB of memory
+localparam MEM_SIZE = 1024 * 1024;
+
+logic [7:0] r_mem[MEM_SIZE-1:0];
 
 logic                w_cpu_mem_write_en;
 common::mem_req_size w_cpu_mem_req_size_out;
@@ -173,7 +176,7 @@ always_ff @ (posedge i_clk)
                             begin
                                 if (w_cpu_mem_write_en)
                                     begin
-                                        if (w_cpu_mem_addr_out < 16384)
+                                        if (w_cpu_mem_addr_out < MEM_SIZE)
                                             begin
                                                 case (w_cpu_mem_req_size_out)
                                                     common::mem_req_size_byte:
@@ -205,7 +208,7 @@ always_ff @ (posedge i_clk)
                                     end
                                 else
                                     begin
-                                        if (w_cpu_mem_addr_out < 16384)
+                                        if (w_cpu_mem_addr_out < MEM_SIZE)
                                             begin
                                                 case (w_cpu_mem_req_size_out)
                                                     common::mem_req_size_byte:
