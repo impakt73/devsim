@@ -72,6 +72,9 @@ logic r_dev_rst;
 logic w_dev_rst;
 assign w_dev_rst = !i_rst_n || r_dev_rst;
 
+// 4KB of 32 bit registers
+localparam REG_SPACE_SIZE = 4 * 1024;
+
 // 1MB of memory
 localparam MEM_SIZE = 1024 * 1024;
 
@@ -142,10 +145,19 @@ assign w_transfer_end_addr = (w_cmd_parser_cmd_size > 0) ? (w_cmd_parser_cmd_add
 wire w_cmd_addr_is_reg;
 assign w_cmd_addr_is_reg = (w_cmd_parser_cmd_addr >= 'h3ffff000);
 
+wire [9:0] w_cmd_reg_idx;
+assign w_cmd_reg_idx = w_cmd_parser_cmd_addr[11:2];
+
+wire [31:0] w_cmd_reg_data;
+assign w_cmd_reg_data = w_cmd_parser_cmd_size;
+
 // TODO: Add actual register addresses
 
 wire [7:0] w_cmd_reg_write_data;
 assign w_cmd_reg_write_data = w_cmd_parser_cmd_size[7:0];
+
+reg [31:0] r_reg_read_data;
+reg [3:0]  r_reg_read_bytes_remaining;
 
 always_ff @ (posedge i_clk)
     if (!i_rst_n)
@@ -157,6 +169,8 @@ always_ff @ (posedge i_clk)
             r_cpu_start_signal <= 0;
             r_transfer_cur_addr <= 0;
             r_cmd_parser_clear_cmd <= 0;
+            r_reg_read_data <= 0;
+            r_reg_read_bytes_remaining <= 0;
         end
     else
         begin
@@ -171,6 +185,14 @@ always_ff @ (posedge i_clk)
                     begin
                         r_out_fifo_write <= 0;
                         r_cmd_parser_clear_cmd <= 0;
+
+                        if (r_reg_read_bytes_remaining > 0)
+                            begin
+                                r_reg_read_bytes_remaining <= r_reg_read_bytes_remaining - 1;
+                                r_out_fifo_input <= r_reg_read_data[7:0];
+                                r_out_fifo_write <= 1;
+                                r_reg_read_data <= (r_reg_read_data >> 8);
+                            end
 
                         if (!w_cpu_is_idle)
                             begin
@@ -201,6 +223,10 @@ always_ff @ (posedge i_clk)
                                                         end
                                                 endcase
                                             end
+                                        else if (w_cpu_mem_addr_out < MEM_SIZE + REG_SPACE_SIZE)
+                                            begin
+                                                // TODO: Support register writes from the cpu
+                                            end
                                         else
                                             begin
                                                 // Drop invalid writes
@@ -229,6 +255,10 @@ always_ff @ (posedge i_clk)
                                                         end
                                                 endcase
                                             end
+                                        else if (w_cpu_mem_addr_out < MEM_SIZE + REG_SPACE_SIZE)
+                                            begin
+                                                // TODO: Support register reads from the cpu
+                                            end
                                         else
                                             begin
                                                 // Return 0 for invalid reads
@@ -251,8 +281,20 @@ always_ff @ (posedge i_clk)
                                             begin
                                                 r_state <= cmd_state_idle;
                                                 r_cmd_parser_clear_cmd <= 1;
-                                                r_out_fifo_input <= { 7'd0, !w_cpu_is_idle };
-                                                r_out_fifo_write <= 1;
+
+                                                case (w_cmd_reg_idx)
+                                                    0:
+                                                        begin
+                                                            r_reg_read_data <= { 31'b0, !w_cpu_is_idle };
+                                                        end
+                                                    default:
+                                                        begin
+                                                            // Return 0 for unknown registers
+                                                            r_reg_read_data <= 0;
+                                                        end
+                                                endcase
+
+                                                r_reg_read_bytes_remaining <= 4;
                                             end
                                         else
                                             begin
@@ -266,7 +308,24 @@ always_ff @ (posedge i_clk)
                                             begin
                                                 r_state <= cmd_state_idle;
                                                 r_cmd_parser_clear_cmd <= 1;
-                                                r_cpu_start_signal <= w_cmd_reg_write_data[0];
+
+                                                if (w_cpu_is_idle)
+                                                    begin
+                                                        case (w_cmd_reg_idx)
+                                                            0:
+                                                                begin
+                                                                    r_cpu_start_signal <= w_cmd_reg_data[0];
+                                                                end
+                                                            default:
+                                                                begin
+                                                                    // Do nothing for unknown registers
+                                                                end
+                                                        endcase
+                                                    end
+                                                else
+                                                    begin
+                                                        // Register writes aren't supported during cpu execution
+                                                    end
                                             end
                                         else
                                             begin

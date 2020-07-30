@@ -24,7 +24,7 @@ fn main() -> Result<()> {
     device.enable();
 
     // Wait for execution to complete
-    const MAX_TRIES: u64 = 4096;
+    const MAX_TRIES: u64 = 0xffffffff;
 
     let mut progress = pbr::ProgressBar::new(MAX_TRIES);
     let mut stopped = false;

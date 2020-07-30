@@ -37,9 +37,9 @@ const CMD_ID_WRITE: u8 = 2;
 
 pub const REG_IDX_DEV_EN: u16 = 0;
 
-pub const DEV_FB_ADDR: u32 = 0x1F00;
-pub const DEV_FB_WIDTH: u32 = 16;
-pub const DEV_FB_HEIGHT: u32 = 16;
+pub const DEV_FB_ADDR: u32 = 0xC0000;
+pub const DEV_FB_WIDTH: u32 = 256;
+pub const DEV_FB_HEIGHT: u32 = 256;
 
 impl io::Read for ProtoBridge {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
@@ -85,9 +85,9 @@ impl ProtoBridge {
         ((id as u64 & 0xf) << 60) | ((addr as u64 & 0x3fffffff) << 30) | (size as u64 & 0x3fffffff)
     }
 
-    fn build_reg_cmd(id: u8, idx: u16, data: u8) -> u64 {
+    fn build_reg_cmd(id: u8, idx: u16, data: u32) -> u64 {
         ((id as u64 & 0xf) << 60)
-            | (((idx as u64 | 0x3ffff000) & 0x3fffffff) << 30)
+            | ((((idx << 2) as u64 | 0x3ffff000) & 0x3fffffff) << 30)
             | (data as u64 & 0x3fffffff)
     }
 
@@ -152,14 +152,14 @@ impl ProtoBridge {
     }
 
     fn cmd_read_reg(&mut self, idx: u16) {
-        self.write_cmd(Self::build_reg_cmd(CMD_ID_READ, idx, 0));
+        self.write_cmd(Self::build_reg_cmd(CMD_ID_READ, idx, 0xffffffff));
     }
 
     fn cmd_write_bytes(&mut self, addr: u32, size: u32) {
         self.write_cmd(Self::build_cmd(CMD_ID_WRITE, addr, size));
     }
 
-    fn cmd_write_reg(&mut self, idx: u16, data: u8) {
+    fn cmd_write_reg(&mut self, idx: u16, data: u32) {
         self.write_cmd(Self::build_reg_cmd(CMD_ID_WRITE, idx, data));
     }
 
@@ -182,20 +182,20 @@ impl ProtoBridge {
         }
     }
 
-    pub fn read_reg(&mut self, idx: u16, max_wait_cycles: usize) -> Result<u8> {
+    pub fn read_reg(&mut self, idx: u16, max_wait_cycles: usize) -> Result<u32> {
         self.cmd_read_reg(idx);
-        match self.wait_for_output(1, max_wait_cycles) {
+        match self.wait_for_output(4, max_wait_cycles) {
             Ok(_) => {
-                let mut buf = [0];
+                let mut buf = [0; 4];
                 self.read_exact(&mut buf)
                     .expect("Failed to read bytes from internal buffer after waiting!");
-                Ok(buf[0])
+                Ok(u32::from_le_bytes(buf))
             }
             Err(err) => Err(err),
         }
     }
 
-    pub fn write_reg(&mut self, idx: u16, data: u8) {
+    pub fn write_reg(&mut self, idx: u16, data: u32) {
         self.cmd_write_reg(idx, data);
     }
 }
