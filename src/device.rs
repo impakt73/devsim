@@ -1,5 +1,5 @@
 use crate::protobridge::{
-    ProtoBridge, DEV_FB_ADDR, DEV_FB_HEIGHT, DEV_FB_WIDTH, REG_IDX_DEV_EN, WAIT_INFINITE_CYCLES,
+    ProtoBridge, REG_IDX_DEV_EN, REG_IDX_FB_ADDR, REG_IDX_FB_CONFIG, WAIT_INFINITE_CYCLES,
 };
 use goblin::Object;
 use std::fs;
@@ -93,15 +93,28 @@ impl Device {
     }
 
     pub fn dump_framebuffer(&mut self) -> Result<FramebufferSnapshot> {
+        let fb_addr = self
+            .bridge
+            .read_reg(REG_IDX_FB_ADDR, WAIT_INFINITE_CYCLES)
+            .expect("Failed to read framebuffer address from device!");
+        let fb_config = self
+            .bridge
+            .read_reg(REG_IDX_FB_CONFIG, WAIT_INFINITE_CYCLES)
+            .expect("Failed to read framebuffer config from device!");
+        println!("FB_ADDR: {}, FB_CONFIG: {}", fb_addr, fb_config);
+
+        let fb_width = 1 << ((fb_config & 0x7) + 1);
+        let fb_height = 1 << (((fb_config >> 3) & 0x7) + 1);
+
         // Create a new framebuffer snapshot to store the framebuffer data in
         let mut snapshot = FramebufferSnapshot {
-            width: DEV_FB_WIDTH,
-            height: DEV_FB_HEIGHT,
-            data: vec![0; (DEV_FB_WIDTH * DEV_FB_HEIGHT) as usize],
+            width: fb_width,
+            height: fb_height,
+            data: vec![0; (fb_width * fb_height) as usize],
         };
 
         self.bridge
-            .read_bytes(DEV_FB_ADDR, &mut snapshot.data, WAIT_INFINITE_CYCLES)?;
+            .read_bytes(fb_addr, &mut snapshot.data, WAIT_INFINITE_CYCLES)?;
 
         Ok(snapshot)
     }

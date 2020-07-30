@@ -36,10 +36,8 @@ const CMD_ID_READ: u8 = 1;
 const CMD_ID_WRITE: u8 = 2;
 
 pub const REG_IDX_DEV_EN: u16 = 0;
-
-pub const DEV_FB_ADDR: u32 = 0xC0000;
-pub const DEV_FB_WIDTH: u32 = 256;
-pub const DEV_FB_HEIGHT: u32 = 256;
+pub const REG_IDX_FB_ADDR: u16 = 1;
+pub const REG_IDX_FB_CONFIG: u16 = 2;
 
 impl io::Read for ProtoBridge {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {

@@ -159,6 +159,15 @@ assign w_cmd_reg_write_data = w_cmd_parser_cmd_size[7:0];
 reg [31:0] r_reg_read_data;
 reg [3:0]  r_reg_read_bytes_remaining;
 
+wire [31:0] w_dev_en;
+assign w_dev_en = { 31'b0, !w_cpu_is_idle };
+
+localparam FB_ADDR = 32'hC0000;
+localparam FB_DIM = 3'($clog2(16) - 1);
+
+reg [31:0] r_fb_addr;
+reg [31:0] r_fb_config;
+
 always_ff @ (posedge i_clk)
     if (!i_rst_n)
         begin
@@ -171,6 +180,9 @@ always_ff @ (posedge i_clk)
             r_cmd_parser_clear_cmd <= 0;
             r_reg_read_data <= 0;
             r_reg_read_bytes_remaining <= 0;
+
+            r_fb_addr <= 32'hC0000;
+            r_fb_config <= { 26'b0, FB_DIM, FB_DIM };
         end
     else
         begin
@@ -257,7 +269,29 @@ always_ff @ (posedge i_clk)
                                             end
                                         else if (w_cpu_mem_addr_out < MEM_SIZE + REG_SPACE_SIZE)
                                             begin
-                                                // TODO: Support register reads from the cpu
+                                                // TODO: Avoid duplicating this logic
+                                                case (w_cpu_mem_addr_out[11:2])
+                                                    // DEV_EN
+                                                    0:
+                                                        begin
+                                                            r_cpu_mem_data_in <= w_dev_en;
+                                                        end
+                                                    // FB_ADDR
+                                                    1:
+                                                        begin
+                                                            r_cpu_mem_data_in <= r_fb_addr;
+                                                        end
+                                                    // FB_CONFIG
+                                                    2:
+                                                        begin
+                                                            r_cpu_mem_data_in <= r_fb_config;
+                                                        end
+                                                    default:
+                                                        begin
+                                                            // Return 0 for unknown registers
+                                                            r_cpu_mem_data_in <= 0;
+                                                        end
+                                                endcase
                                             end
                                         else
                                             begin
@@ -282,10 +316,22 @@ always_ff @ (posedge i_clk)
                                                 r_state <= cmd_state_idle;
                                                 r_cmd_parser_clear_cmd <= 1;
 
+                                                // TODO: Avoid duplicating this logic
                                                 case (w_cmd_reg_idx)
+                                                    // DEV_EN
                                                     0:
                                                         begin
-                                                            r_reg_read_data <= { 31'b0, !w_cpu_is_idle };
+                                                            r_reg_read_data <= w_dev_en;
+                                                        end
+                                                    // FB_ADDR
+                                                    1:
+                                                        begin
+                                                            r_reg_read_data <= r_fb_addr;
+                                                        end
+                                                    // FB_CONFIG
+                                                    2:
+                                                        begin
+                                                            r_reg_read_data <= r_fb_config;
                                                         end
                                                     default:
                                                         begin
