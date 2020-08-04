@@ -92,19 +92,25 @@ impl Device {
         }
     }
 
-    pub fn dump_framebuffer(&mut self) -> Result<FramebufferSnapshot> {
-        let fb_addr = self
-            .bridge
-            .read_reg(REG_IDX_FB_ADDR, WAIT_INFINITE_CYCLES)
-            .expect("Failed to read framebuffer address from device!");
+    /// Queries the framebuffer size from the device
+    pub fn query_framebuffer_size(&mut self) -> Result<(u32, u32)> {
         let fb_config = self
             .bridge
-            .read_reg(REG_IDX_FB_CONFIG, WAIT_INFINITE_CYCLES)
-            .expect("Failed to read framebuffer config from device!");
-        println!("FB_ADDR: {}, FB_CONFIG: {}", fb_addr, fb_config);
+            .read_reg(REG_IDX_FB_CONFIG, WAIT_INFINITE_CYCLES)?;
 
         let fb_width = 1 << ((fb_config & 0x7) + 1);
         let fb_height = 1 << (((fb_config >> 3) & 0x7) + 1);
+
+        Ok((fb_width, fb_height))
+    }
+
+    /// Dumps a snapshot of the device framebuffer
+    pub fn dump_framebuffer(&mut self) -> Result<FramebufferSnapshot> {
+        let (fb_width, fb_height) = self.query_framebuffer_size()?;
+
+        let fb_addr = self
+            .bridge
+            .read_reg(REG_IDX_FB_ADDR, WAIT_INFINITE_CYCLES)?;
 
         // Create a new framebuffer snapshot to store the framebuffer data in
         let mut snapshot = FramebufferSnapshot {
