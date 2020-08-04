@@ -1,5 +1,6 @@
 use devsim::device::Device;
 use gumdrop::Options;
+use std::time::Duration;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -27,6 +28,8 @@ fn main() -> Result<()> {
     const MAX_TRIES: u64 = 0xffffffff;
 
     let mut progress = pbr::ProgressBar::new(MAX_TRIES);
+    progress.set_max_refresh_rate(Some(Duration::from_millis(100)));
+
     let mut stopped = false;
 
     for _ in 0..MAX_TRIES {
