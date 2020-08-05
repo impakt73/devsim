@@ -8,6 +8,10 @@ edition = "2018"
 goblin = "0.2"
 gumdrop = "0.8"
 pbr = "1"
+winit = "0.22"
+ash = "0.31"
+vk-mem = "0.2"
+ash-window = "0.5"
 
 [dependencies.image]
 default-features = false
