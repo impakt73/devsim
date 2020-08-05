@@ -2,17 +2,39 @@ use crate::protobridge::{
     ProtoBridge, REG_IDX_DEV_EN, REG_IDX_FB_ADDR, REG_IDX_FB_CONFIG, WAIT_INFINITE_CYCLES,
 };
 use goblin::Object;
+use std::error;
+use std::fmt;
 use std::fs;
 use std::path::Path;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-#[derive(Default)]
-pub struct FramebufferSnapshot {
-    pub width: u32,
-    pub height: u32,
-    pub data: Vec<u8>,
+/// Enumeration of possible device error types
+#[derive(Debug, Clone)]
+enum DeviceErrorKind {
+    /// The provided buffer was too small to contain the result
+    BufferTooSmall,
 }
+
+/// A device error
+#[derive(Debug, Clone)]
+pub struct DeviceError {
+    kind: DeviceErrorKind,
+}
+
+impl DeviceError {
+    fn from(kind: DeviceErrorKind) -> Self {
+        DeviceError { kind }
+    }
+}
+
+impl fmt::Display for DeviceError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:#?}", self.kind)
+    }
+}
+
+impl error::Error for DeviceError {}
 
 pub struct Device {
     bridge: ProtoBridge,
@@ -104,25 +126,24 @@ impl Device {
         Ok((fb_width, fb_height))
     }
 
-    /// Dumps a snapshot of the device framebuffer
-    pub fn dump_framebuffer(&mut self) -> Result<FramebufferSnapshot> {
+    /// Dumps a snapshot of the device framebuffer into the buffer provided by the caller
+    /// The buffer should be large enough to hold the data contained within the framebuffer or an error will be returned
+    pub fn dump_framebuffer(&mut self, dst: &mut [u8]) -> Result<()> {
         let (fb_width, fb_height) = self.query_framebuffer_size()?;
+        let fb_num_pixels = (fb_width * fb_height * 4) as usize;
 
-        let fb_addr = self
-            .bridge
-            .read_reg(REG_IDX_FB_ADDR, WAIT_INFINITE_CYCLES)?;
+        // Make sure the destination buffer is large enough
+        if fb_num_pixels <= dst.len() {
+            let fb_addr = self
+                .bridge
+                .read_reg(REG_IDX_FB_ADDR, WAIT_INFINITE_CYCLES)?;
 
-        // Create a new framebuffer snapshot to store the framebuffer data in
-        let mut snapshot = FramebufferSnapshot {
-            width: fb_width,
-            height: fb_height,
-            data: vec![0; (fb_width * fb_height) as usize],
-        };
+            self.bridge.read_bytes(fb_addr, dst, WAIT_INFINITE_CYCLES)?;
 
-        self.bridge
-            .read_bytes(fb_addr, &mut snapshot.data, WAIT_INFINITE_CYCLES)?;
-
-        Ok(snapshot)
+            Ok(())
+        } else {
+            Err(DeviceError::from(DeviceErrorKind::BufferTooSmall).into())
+        }
     }
 }
 

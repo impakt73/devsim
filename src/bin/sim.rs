@@ -1,5 +1,6 @@
 use devsim::device::Device;
 use gumdrop::Options;
+use image::RgbaImage;
 use std::time::Duration;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -63,18 +64,16 @@ fn main() -> Result<()> {
         println!("Execution stopped due to timeout");
     }
 
-    let framebuffer = device
-        .dump_framebuffer()
+    let (width, height) = device.query_framebuffer_size()?;
+    let fb_size = (width * height * 4) as usize;
+    let mut fb_data = vec![0; fb_size];
+
+    device
+        .dump_framebuffer(&mut fb_data)
         .expect("Failed to dump device framebuffer!");
 
-    let image: image::ImageBuffer<image::Rgb<u8>, Vec<u8>> =
-        image::ImageBuffer::from_fn(framebuffer.width, framebuffer.height, |x, y| {
-            let idx = y * framebuffer.width + x;
-            let color = framebuffer.data[idx as usize];
-
-            image::Rgb([color, color, color])
-        });
-
+    let image = RgbaImage::from_raw(width, height, fb_data)
+        .expect("Failed to create image from framebuffer");
     image
         .save("image.png")
         .expect("Failed to write image output!");
