@@ -56,14 +56,17 @@ pub fn show(elf_path: &impl AsRef<Path>) -> ! {
         .load_elf(&elf_path)
         .expect("Failed to load elf file");
 
-    let (width, height) = hw_device
+    let (fb_width, fb_height) = hw_device
         .query_framebuffer_size()
         .expect("Failed to query framebuffer size");
+
+    let window_width = 256;
+    let window_height = 256;
 
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
         .with_title("DevSim View")
-        .with_inner_size(winit::dpi::PhysicalSize::new(width, height))
+        .with_inner_size(winit::dpi::PhysicalSize::new(window_width, window_height))
         .build(&event_loop)
         .expect("Failed to create window");
 
@@ -177,7 +180,10 @@ pub fn show(elf_path: &impl AsRef<Path>) -> ! {
             desired_image_count = surface_capabilities.max_image_count;
         }
         let surface_resolution = match surface_capabilities.current_extent.width {
-            std::u32::MAX => vk::Extent2D { width, height },
+            std::u32::MAX => vk::Extent2D {
+                width: window_width,
+                height: window_height,
+            },
             _ => surface_capabilities.current_extent,
         };
         let pre_transform = if surface_capabilities
@@ -233,7 +239,7 @@ pub fn show(elf_path: &impl AsRef<Path>) -> ! {
             )
             .unwrap();
 
-        let image_size_bytes = width * height * 4;
+        let image_size_bytes = fb_width * fb_height * 4;
 
         let allocator = vk_mem::Allocator::new(&vk_mem::AllocatorCreateInfo {
             physical_device: pdevice,
@@ -297,24 +303,48 @@ pub fn show(elf_path: &impl AsRef<Path>) -> ! {
                     .build()],
             );
 
-            // TODO: Should we bother clearing for a fully host generated image...?
-            /*
             device.cmd_clear_color_image(
                 cmd_buffer,
                 swapchain_images[idx as usize],
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 &vk::ClearColorValue {
-                    float32: [1.0, 0.0, 0.0, 1.0],
+                    float32: [0.0, 0.0, 0.0, 1.0],
                 },
-                & [vk::ImageSubresourceRange::builder()
+                &[vk::ImageSubresourceRange::builder()
                     .aspect_mask(vk::ImageAspectFlags::COLOR)
                     .base_mip_level(0)
                     .level_count(1)
                     .base_array_layer(0)
                     .layer_count(1)
-                    .build()]
+                    .build()],
             );
-            */
+
+            device.cmd_pipeline_barrier(
+                cmd_buffer,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[vk::ImageMemoryBarrier::builder()
+                    .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                    .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                    .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                    .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .image(swapchain_images[idx as usize])
+                    .subresource_range(
+                        vk::ImageSubresourceRange::builder()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .base_mip_level(0)
+                            .level_count(1)
+                            .base_array_layer(0)
+                            .layer_count(1)
+                            .build(),
+                    )
+                    .build()],
+            );
 
             // Copy the latest device image data to the swapchain image
             let buffer_offset = idx * image_size_bytes;
@@ -331,9 +361,14 @@ pub fn show(elf_path: &impl AsRef<Path>) -> ! {
                         base_array_layer: 0,
                         layer_count: 1,
                     })
+                    .image_offset(vk::Offset3D {
+                        x: ((window_width / 2) - (fb_width / 2)) as i32,
+                        y: ((window_height / 2) - (fb_height / 2)) as i32,
+                        z: 0,
+                    })
                     .image_extent(vk::Extent3D {
-                        width,
-                        height,
+                        width: fb_width,
+                        height: fb_height,
                         depth: 1,
                     })
                     .build()],

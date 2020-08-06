@@ -163,7 +163,7 @@ wire [31:0] w_dev_en;
 assign w_dev_en = { 31'b0, !w_cpu_is_idle };
 
 localparam FB_ADDR = 32'hC0000;
-localparam FB_DIM = 3'($clog2(256) - 1);
+localparam FB_DIM = 3'($clog2(64) - 1);
 
 reg [31:0] r_fb_addr;
 reg [31:0] r_fb_config;
