@@ -1,10 +1,4 @@
-use ash::{
-    extensions::{ext::DebugUtils, khr::Swapchain},
-    version::{DeviceV1_0, EntryV1_0, InstanceV1_0},
-    vk, Device,
-};
-use std::borrow::Cow;
-use std::ffi::{CStr, CString};
+use ash::{version::DeviceV1_0, vk};
 use std::path::Path;
 use winit::{
     event::{
@@ -14,56 +8,12 @@ use winit::{
     window::WindowBuilder,
 };
 
+use devsim::vkutil::RenderDevice;
 use gumdrop::Options;
 
-unsafe extern "system" fn vulkan_debug_callback(
-    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
-    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
-    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
-    _user_data: *mut std::os::raw::c_void,
-) -> vk::Bool32 {
-    let callback_data = *p_callback_data;
-    let message_id_number: i32 = callback_data.message_id_number as i32;
-
-    let message_id_name = if callback_data.p_message_id_name.is_null() {
-        Cow::from("")
-    } else {
-        CStr::from_ptr(callback_data.p_message_id_name).to_string_lossy()
-    };
-
-    let message = if callback_data.p_message.is_null() {
-        Cow::from("")
-    } else {
-        CStr::from_ptr(callback_data.p_message).to_string_lossy()
-    };
-
-    println!(
-        "{:?}:\n{:?} [{} ({})] : {}\n",
-        message_severity,
-        message_type,
-        message_id_name,
-        &message_id_number.to_string(),
-        message,
-    );
-
-    vk::FALSE
-}
-
 struct Renderer {
-    entry: ash::Entry,
-    instance: ash::Instance,
-    device: ash::Device,
-    surface: vk::SurfaceKHR,
-    surface_ext: ash::extensions::khr::Surface,
-    surface_resolution: vk::Extent2D,
-    present_queue: vk::Queue,
-    swapchain: vk::SwapchainKHR,
-    swapchain_ext: ash::extensions::khr::Swapchain,
-    swapchain_images: Vec<vk::Image>,
-    swapchain_image_views: Vec<vk::ImageView>,
     renderpass: vk::RenderPass,
     framebuffers: Vec<vk::Framebuffer>,
-    allocator: vk_mem::Allocator,
     cmd_pool: vk::CommandPool,
     cmd_buffers: Vec<vk::CommandBuffer>,
     fences: Vec<vk::Fence>,
@@ -77,193 +27,20 @@ struct Renderer {
     rendering_finished_semaphores: Vec<vk::Semaphore>,
     cur_frame_idx: usize,
     cur_swapchain_idx: usize,
+    device: RenderDevice,
 }
 
 impl Renderer {
     fn new(window: &winit::window::Window) -> Self {
         unsafe {
-            let entry = ash::Entry::new().expect("Failed to load vulkan library");
-            let surface_extensions = ash_window::enumerate_required_extensions(window)
-                .expect("Failed to enumerate vulkan window extensions");
-            let mut instance_extensions = surface_extensions
-                .iter()
-                .map(|ext| ext.as_ptr())
-                .collect::<Vec<_>>();
-            instance_extensions.push(DebugUtils::name().as_ptr());
-            let validation_ext_name = CString::new("VK_LAYER_KHRONOS_validation").unwrap();
-            let instance_layers = [validation_ext_name.as_ptr()];
-            let app_desc = vk::ApplicationInfo::builder().api_version(vk::make_version(1, 2, 0));
-            let instance_desc = vk::InstanceCreateInfo::builder()
-                .application_info(&app_desc)
-                .enabled_extension_names(&instance_extensions)
-                .enabled_layer_names(&instance_layers);
-
-            let instance = entry
-                .create_instance(&instance_desc, None)
-                .expect("Failed to create vulkan instance");
-
-            // Create a surface from winit window.
-            let surface = ash_window::create_surface(&entry, &instance, window, None)
-                .expect("Failed to create vulkan window surface");
-            let surface_ext = ash::extensions::khr::Surface::new(&entry, &instance);
-
-            let debug_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-                .message_severity(
-                    vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-                        | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING,
-                )
-                .message_type(vk::DebugUtilsMessageTypeFlagsEXT::all())
-                .pfn_user_callback(Some(vulkan_debug_callback));
-
-            let debug_utils_loader = DebugUtils::new(&entry, &instance);
-            let _debug_call_back = debug_utils_loader
-                .create_debug_utils_messenger(&debug_info, None)
-                .unwrap();
-            let pdevices = instance
-                .enumerate_physical_devices()
-                .expect("Physical device error");
-            let (pdevice, queue_family_index) = pdevices
-                .iter()
-                .map(|pdevice| {
-                    instance
-                        .get_physical_device_queue_family_properties(*pdevice)
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(index, ref info)| {
-                            let supports_graphic_and_surface =
-                                info.queue_flags.contains(vk::QueueFlags::GRAPHICS)
-                                    && surface_ext
-                                        .get_physical_device_surface_support(
-                                            *pdevice,
-                                            index as u32,
-                                            surface,
-                                        )
-                                        .unwrap();
-                            if supports_graphic_and_surface {
-                                Some((*pdevice, index))
-                            } else {
-                                None
-                            }
-                        })
-                        .next()
-                })
-                .filter_map(|v| v)
-                .next()
-                .expect("Couldn't find suitable device.");
-            let queue_family_index = queue_family_index as u32;
-            let device_extension_names_raw = [Swapchain::name().as_ptr()];
-            let priorities = [1.0];
-
-            let queue_info = [vk::DeviceQueueCreateInfo::builder()
-                .queue_family_index(queue_family_index)
-                .queue_priorities(&priorities)
-                .build()];
-
-            let device_create_info = vk::DeviceCreateInfo::builder()
-                .queue_create_infos(&queue_info)
-                .enabled_extension_names(&device_extension_names_raw);
-
-            let device: Device = instance
-                .create_device(pdevice, &device_create_info, None)
-                .unwrap();
-
-            let present_queue = device.get_device_queue(queue_family_index as u32, 0);
-
-            let surface_formats = surface_ext
-                .get_physical_device_surface_formats(pdevice, surface)
-                .unwrap();
-            let surface_format = surface_formats
-                .iter()
-                .find(|sfmt| match sfmt.format {
-                    vk::Format::R8G8B8A8_UNORM => true,
-                    _ => false,
-                })
-                .expect("Unable to find suitable surface format.");
-            let surface_capabilities = surface_ext
-                .get_physical_device_surface_capabilities(pdevice, surface)
-                .unwrap();
-            let mut desired_image_count = surface_capabilities.min_image_count + 1;
-            if surface_capabilities.max_image_count > 0
-                && desired_image_count > surface_capabilities.max_image_count
-            {
-                desired_image_count = surface_capabilities.max_image_count;
-            }
-            let surface_resolution = match surface_capabilities.current_extent.width {
-                std::u32::MAX => vk::Extent2D {
-                    width: window.inner_size().width,
-                    height: window.inner_size().height,
-                },
-                _ => surface_capabilities.current_extent,
-            };
-            let pre_transform = if surface_capabilities
-                .supported_transforms
-                .contains(vk::SurfaceTransformFlagsKHR::IDENTITY)
-            {
-                vk::SurfaceTransformFlagsKHR::IDENTITY
-            } else {
-                surface_capabilities.current_transform
-            };
-            let present_modes = surface_ext
-                .get_physical_device_surface_present_modes(pdevice, surface)
-                .unwrap();
-            let present_mode = present_modes
-                .iter()
-                .cloned()
-                .find(|&mode| mode == vk::PresentModeKHR::MAILBOX)
-                .unwrap_or(vk::PresentModeKHR::FIFO);
-            let swapchain_ext = Swapchain::new(&instance, &device);
-
-            let swapchain_create_info = vk::SwapchainCreateInfoKHR::builder()
-                .surface(surface)
-                .min_image_count(desired_image_count)
-                .image_color_space(surface_format.color_space)
-                .image_format(surface_format.format)
-                .image_extent(surface_resolution)
-                .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
-                .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
-                .pre_transform(pre_transform)
-                .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-                .present_mode(present_mode)
-                .clipped(true)
-                .image_array_layers(1);
-
-            let swapchain = swapchain_ext
-                .create_swapchain(&swapchain_create_info, None)
-                .unwrap();
-
-            let swapchain_images = swapchain_ext.get_swapchain_images(swapchain).unwrap();
-
-            let swapchain_image_views: Vec<_> = swapchain_images
-                .iter()
-                .map(|&image| {
-                    device
-                        .create_image_view(
-                            &vk::ImageViewCreateInfo::builder()
-                                .image(image)
-                                .view_type(vk::ImageViewType::TYPE_2D)
-                                .format(surface_format.format)
-                                .components(
-                                    vk::ComponentMapping::builder()
-                                        .r(vk::ComponentSwizzle::IDENTITY)
-                                        .g(vk::ComponentSwizzle::IDENTITY)
-                                        .b(vk::ComponentSwizzle::IDENTITY)
-                                        .a(vk::ComponentSwizzle::IDENTITY)
-                                        .build(),
-                                )
-                                .subresource_range(
-                                    vk::ImageSubresourceRange::builder()
-                                        .aspect_mask(vk::ImageAspectFlags::COLOR)
-                                        .base_mip_level(0)
-                                        .level_count(1)
-                                        .base_array_layer(0)
-                                        .layer_count(1)
-                                        .build(),
-                                ),
-                            None,
-                        )
-                        .unwrap()
-                })
-                .collect();
+            let render_device =
+                RenderDevice::new(window, true).expect("Failed to create render device!");
+            let device = render_device.raw();
+            let surface_format = render_device.swapchain.surface_format;
+            let surface_resolution = render_device.swapchain.surface_resolution;
+            let desired_image_count = render_device.swapchain_images.len() as u32;
+            let swapchain_image_views = &render_device.swapchain_image_views;
+            let queue_family_index = render_device.get_graphics_family_index();
 
             let renderpass = device
                 .create_render_pass(
@@ -305,17 +82,6 @@ impl Renderer {
                         .unwrap()
                 })
                 .collect();
-
-            let allocator = vk_mem::Allocator::new(&vk_mem::AllocatorCreateInfo {
-                physical_device: pdevice,
-                device: device.clone(),
-                instance: instance.clone(),
-                flags: vk_mem::AllocatorCreateFlags::NONE,
-                preferred_large_heap_block_size: 0,
-                frame_in_use_count: 0,
-                heap_size_limits: None,
-            })
-            .unwrap();
 
             let cmd_pool = device
                 .create_command_pool(
@@ -475,7 +241,7 @@ impl Renderer {
                 )
                 .unwrap();
 
-            let entry_point_c_string = CString::new("main").unwrap();
+            let entry_point_c_string = std::ffi::CString::new("main").unwrap();
             let gfx_pipeline = device
                 .create_graphics_pipelines(
                     vk::PipelineCache::null(),
@@ -550,20 +316,8 @@ impl Renderer {
                 .unwrap()[0];
 
             Renderer {
-                entry,
-                instance,
-                device,
-                surface,
-                surface_ext,
-                surface_resolution,
-                present_queue,
-                swapchain,
-                swapchain_ext,
-                swapchain_images,
-                swapchain_image_views,
                 renderpass,
                 framebuffers,
-                allocator,
                 cmd_pool,
                 cmd_buffers,
                 fences,
@@ -577,6 +331,7 @@ impl Renderer {
                 rendering_finished_semaphores,
                 cur_frame_idx: 0,
                 cur_swapchain_idx: 0,
+                device: render_device,
             }
         }
     }
@@ -586,9 +341,11 @@ impl Renderer {
             // Acquire the current swapchain image index
             // TODO: Handle suboptimal swapchains
             let (image_index, _is_suboptimal) = self
-                .swapchain_ext
+                .device
+                .swapchain
+                .ext
                 .acquire_next_image(
-                    self.swapchain,
+                    self.device.swapchain.inner,
                     u64::MAX,
                     self.image_available_semaphores[self.cur_frame_idx],
                     vk::Fence::null(),
@@ -598,12 +355,14 @@ impl Renderer {
 
             // Wait for the resources for this frame to become available
             self.device
+                .raw()
                 .wait_for_fences(&[self.fences[self.cur_frame_idx]], true, u64::MAX)
                 .unwrap();
 
             let cmd_buffer = self.cmd_buffers[self.cur_swapchain_idx];
 
             self.device
+                .raw()
                 .begin_command_buffer(cmd_buffer, &vk::CommandBufferBeginInfo::default())
                 .unwrap();
 
@@ -613,14 +372,14 @@ impl Renderer {
 
     fn begin_render(&self) {
         unsafe {
-            self.device.cmd_begin_render_pass(
+            self.device.raw().cmd_begin_render_pass(
                 self.cmd_buffers[self.cur_swapchain_idx],
                 &vk::RenderPassBeginInfo::builder()
                     .render_pass(self.renderpass)
                     .framebuffer(self.framebuffers[self.cur_swapchain_idx])
                     .render_area(
                         vk::Rect2D::builder()
-                            .extent(self.surface_resolution)
+                            .extent(self.device.swapchain.surface_resolution)
                             .build(),
                     )
                     .clear_values(&[vk::ClearValue {
@@ -636,13 +395,14 @@ impl Renderer {
     fn end_render(&self) {
         unsafe {
             self.device
+                .raw()
                 .cmd_end_render_pass(self.cmd_buffers[self.cur_swapchain_idx]);
         }
     }
 
     fn end_frame(&mut self, cmd_buffer: vk::CommandBuffer) {
         unsafe {
-            self.device.end_command_buffer(cmd_buffer).unwrap();
+            self.device.raw().end_command_buffer(cmd_buffer).unwrap();
 
             // The user should always pass the same cmdbuffer back to us after a frame
             assert_eq!(self.cmd_buffers[self.cur_swapchain_idx], cmd_buffer);
@@ -658,50 +418,50 @@ impl Renderer {
                 .build();
 
             let fence = self.fences[self.cur_frame_idx];
-            self.device.reset_fences(&[fence]).unwrap();
+            self.device.raw().reset_fences(&[fence]).unwrap();
             self.device
-                .queue_submit(self.present_queue, &[submit_info], fence)
+                .raw()
+                .queue_submit(self.device.get_present_queue(), &[submit_info], fence)
                 .unwrap();
 
-            let swapchains = vec![self.swapchain];
+            let swapchains = vec![self.device.swapchain.inner];
             let image_indices = vec![self.cur_swapchain_idx as u32];
             let present_info = vk::PresentInfoKHR::builder()
                 .wait_semaphores(&signal_semaphores)
                 .swapchains(&swapchains)
                 .image_indices(&image_indices);
 
-            self.swapchain_ext
-                .queue_present(self.present_queue, &present_info)
+            self.device
+                .swapchain
+                .ext
+                .queue_present(self.device.get_present_queue(), &present_info)
                 .unwrap();
 
-            self.cur_frame_idx = (self.cur_frame_idx + 1) % self.swapchain_images.len();
+            self.cur_frame_idx = (self.cur_frame_idx + 1) % self.device.swapchain_images.len();
         }
     }
 
     fn get_device(&self) -> &ash::Device {
-        &self.device
+        self.device.raw()
     }
     fn get_allocator(&mut self) -> &mut vk_mem::Allocator {
-        &mut self.allocator
+        &mut self.device.allocator
     }
 
     fn get_cur_swapchain_idx(&self) -> usize {
         self.cur_swapchain_idx
     }
     fn get_cur_swapchain_image(&self) -> vk::Image {
-        self.swapchain_images[self.cur_swapchain_idx]
+        self.device.swapchain_images[self.cur_swapchain_idx]
     }
     fn get_num_swapchain_images(&self) -> usize {
-        self.swapchain_images.len()
+        self.device.swapchain_images.len()
     }
 }
 
 impl Drop for Renderer {
     fn drop(&mut self) {
-        unsafe {
-            // TODO: Proper vk destruction
-            self.instance.destroy_instance(None);
-        }
+        // TODO: Proper vk destruction
     }
 }
 
@@ -965,7 +725,11 @@ pub fn show(elf_path: &impl AsRef<Path>) -> ! {
 
                 renderer.begin_render();
 
-                device.cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, renderer.gfx_pipeline);
+                device.cmd_bind_pipeline(
+                    cmd_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    renderer.gfx_pipeline,
+                );
 
                 device.cmd_bind_descriptor_sets(
                     cmd_buffer,
