@@ -965,7 +965,11 @@ pub fn show(elf_path: &impl AsRef<Path>) -> ! {
 
                 renderer.begin_render();
 
-                device.cmd_bind_pipeline(cmd_buffer, vk::PipelineBindPoint::GRAPHICS, renderer.gfx_pipeline);
+                device.cmd_bind_pipeline(
+                    cmd_buffer,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    renderer.gfx_pipeline,
+                );
 
                 device.cmd_bind_descriptor_sets(
                     cmd_buffer,

@@ -13,6 +13,8 @@ ash = "0.31"
 vk-mem = "0.2"
 ash-window = "0.5"
 shaderc = "0.6"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [dependencies.image]
 default-features = false

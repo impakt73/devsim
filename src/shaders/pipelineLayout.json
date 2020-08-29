@@ -1,0 +1,39 @@
+{
+    "name": "DefaultGfxLayout",
+    "descriptorSets":
+    [
+        {
+            "bindings":
+            [
+                {
+                    "type": "sampler",
+                    "count": 1,
+                    "stages": ["fragment", "compute"],
+                    "immutableSamplers":
+                    [
+                        {
+                            "magFilter": "linear",
+                            "minFilter": "linear",
+                            "mipMode": "linear",
+                            "addressModeU": "clampToEdge",
+                            "addressModeV": "clampToEdge",
+                            "minLod": "clampToEdge",
+                            "maxLod": "clampToEdge"
+                        }
+                    ]
+                },
+                {
+                    "type": "storageBufferDynamic",
+                    "count": 1,
+                    "stages": ["fragment", "compute"]
+                },
+                {
+                    "type": "sampledImage",
+                    "count": 1,
+                    "stages": ["fragment", "compute"]
+                }
+            ]
+        }
+    ],
+    "pushConstants": []
+}
