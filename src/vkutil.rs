@@ -415,8 +415,8 @@ impl Drop for VkDevice {
 }
 
 pub struct VkSwapchain {
-    pub inner: vk::SwapchainKHR,
-    pub ext: ash::extensions::khr::Swapchain,
+    inner: vk::SwapchainKHR,
+    ext: ash::extensions::khr::Swapchain,
     pub surface_format: vk::SurfaceFormatKHR,
     pub surface_resolution: vk::Extent2D,
 }
@@ -518,6 +518,40 @@ impl VkSwapchain {
                 surface_resolution,
             })
         }
+    }
+
+    /// Attempts to acquire the next image in the swapchain
+    pub fn acquire_next_image(
+        &self,
+        timeout: u64,
+        semaphore: Option<vk::Semaphore>,
+        fence: Option<vk::Fence>,
+    ) -> Result<(u32, bool)> {
+        unsafe {
+            Ok(self.ext.acquire_next_image(
+                self.inner,
+                timeout,
+                semaphore.unwrap_or_default(),
+                fence.unwrap_or_default(),
+            )?)
+        }
+    }
+
+    // Attempts to present the specified swapchain image on the display
+    pub fn present_image(
+        &self,
+        index: u32,
+        wait_semaphores: &[vk::Semaphore],
+        queue: vk::Queue,
+    ) -> Result<bool> {
+        let swapchains = [self.inner];
+        let image_indices = [index];
+        let present_info = vk::PresentInfoKHR::builder()
+            .wait_semaphores(wait_semaphores)
+            .swapchains(&swapchains)
+            .image_indices(&image_indices);
+
+        unsafe { Ok(self.ext.queue_present(queue, &present_info)?) }
     }
 }
 

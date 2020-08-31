@@ -343,12 +343,10 @@ impl Renderer {
             let (image_index, _is_suboptimal) = self
                 .device
                 .swapchain
-                .ext
                 .acquire_next_image(
-                    self.device.swapchain.inner,
                     u64::MAX,
-                    self.image_available_semaphores[self.cur_frame_idx],
-                    vk::Fence::null(),
+                    Some(self.image_available_semaphores[self.cur_frame_idx]),
+                    None,
                 )
                 .unwrap();
             self.cur_swapchain_idx = image_index as usize;
@@ -424,17 +422,13 @@ impl Renderer {
                 .queue_submit(self.device.get_present_queue(), &[submit_info], fence)
                 .unwrap();
 
-            let swapchains = vec![self.device.swapchain.inner];
-            let image_indices = vec![self.cur_swapchain_idx as u32];
-            let present_info = vk::PresentInfoKHR::builder()
-                .wait_semaphores(&signal_semaphores)
-                .swapchains(&swapchains)
-                .image_indices(&image_indices);
-
             self.device
                 .swapchain
-                .ext
-                .queue_present(self.device.get_present_queue(), &present_info)
+                .present_image(
+                    self.cur_swapchain_idx as u32,
+                    &signal_semaphores,
+                    self.device.get_present_queue(),
+                )
                 .unwrap();
 
             self.cur_frame_idx = (self.cur_frame_idx + 1) % self.device.swapchain_images.len();
