@@ -293,7 +293,12 @@ fn find_best_queue_for_usage(
     queue_index as usize
 }
 
-const VK_QUEUE_TYPE_COUNT: usize = 4;
+enum VkQueueType {
+    Graphics = 0,
+    Compute,
+    Transfer,
+}
+const VK_QUEUE_TYPE_COUNT: usize = 3;
 
 struct VkDevice {
     inner: ash::Device,
@@ -367,10 +372,6 @@ impl VkDevice {
                     [find_best_queue_for_usage(&queue_family_properties, vk::QueueFlags::COMPUTE)],
                 queues
                     [find_best_queue_for_usage(&queue_family_properties, vk::QueueFlags::TRANSFER)],
-                queues[find_best_queue_for_usage(
-                    &queue_family_properties,
-                    vk::QueueFlags::SPARSE_BINDING,
-                )],
             ];
 
             let present_queue = queues[present_queue_family_index as usize];
@@ -386,19 +387,15 @@ impl VkDevice {
     }
 
     fn graphics_queue(&self) -> vk::Queue {
-        self.queues_by_type[0]
+        self.queues_by_type[VkQueueType::Graphics as usize]
     }
 
     fn compute_queue(&self) -> vk::Queue {
-        self.queues_by_type[1]
+        self.queues_by_type[VkQueueType::Compute as usize]
     }
 
     fn transfer_queue(&self) -> vk::Queue {
-        self.queues_by_type[2]
-    }
-
-    fn sparse_queue(&self) -> vk::Queue {
-        self.queues_by_type[3]
+        self.queues_by_type[VkQueueType::Transfer as usize]
     }
 
     fn present_queue(&self) -> vk::Queue {
