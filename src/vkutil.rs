@@ -560,6 +560,78 @@ impl Drop for VkSwapchain {
     }
 }
 
+pub struct VkBuffer<'a> {
+    inner: vk::Buffer,
+    allocator: &'a vk_mem::Allocator,
+    allocation: vk_mem::Allocation,
+}
+
+impl<'a> VkBuffer<'a> {
+    pub fn new(
+        allocator: &'a vk_mem::Allocator,
+        buffer_info: &vk::BufferCreateInfo,
+        allocation_info: &vk_mem::AllocationCreateInfo,
+    ) -> Result<Self> {
+        let (inner, allocation, _alloc_info) =
+            allocator.create_buffer(buffer_info, allocation_info)?;
+        Ok(VkBuffer {
+            inner,
+            allocator,
+            allocation,
+        })
+    }
+
+    pub fn raw(&self) -> vk::Buffer {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkBuffer<'a> {
+    fn drop(&mut self) {
+        // TODO: This function always returns a successful result and should be modified to not
+        //       return anything.
+        self.allocator
+            .destroy_buffer(self.inner, &self.allocation)
+            .unwrap();
+    }
+}
+
+pub struct VkImage<'a> {
+    inner: vk::Image,
+    allocator: &'a vk_mem::Allocator,
+    allocation: vk_mem::Allocation,
+}
+
+impl<'a> VkImage<'a> {
+    pub fn new(
+        allocator: &'a vk_mem::Allocator,
+        image_info: &vk::ImageCreateInfo,
+        allocation_info: &vk_mem::AllocationCreateInfo,
+    ) -> Result<Self> {
+        let (inner, allocation, _alloc_info) =
+            allocator.create_image(image_info, allocation_info)?;
+        Ok(VkImage {
+            inner,
+            allocator,
+            allocation,
+        })
+    }
+
+    pub fn raw(&self) -> vk::Image {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkImage<'a> {
+    fn drop(&mut self) {
+        // TODO: This function always returns a successful result and should be modified to not
+        //       return anything.
+        self.allocator
+            .destroy_image(self.inner, &self.allocation)
+            .unwrap();
+    }
+}
+
 // Wrapper structure used to load and manage a logical Vulkan device
 pub struct RenderDevice {
     pub allocator: vk_mem::Allocator,
