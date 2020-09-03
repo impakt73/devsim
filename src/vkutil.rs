@@ -857,6 +857,29 @@ impl<'a> Drop for VkShaderModule<'a> {
     }
 }
 
+pub struct VkPipeline<'a> {
+    inner: vk::Pipeline,
+    device: &'a ash::Device,
+}
+
+impl<'a> VkPipeline<'a> {
+    fn from_pipeline(device: &'a ash::Device, inner: vk::Pipeline) -> Self {
+        VkPipeline { inner, device }
+    }
+
+    pub fn raw(&self) -> vk::Pipeline {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkPipeline<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_pipeline(self.inner, None);
+        }
+    }
+}
+
 pub struct VkPipelineCache<'a> {
     inner: vk::PipelineCache,
     device: &'a ash::Device,
@@ -870,6 +893,34 @@ impl<'a> VkPipelineCache<'a> {
 
     pub fn raw(&self) -> vk::PipelineCache {
         self.inner
+    }
+
+    pub fn create_graphics_pipeline(
+        &self,
+        create_info: vk::GraphicsPipelineCreateInfo,
+    ) -> Result<VkPipeline> {
+        let result = unsafe {
+            self.device
+                .create_graphics_pipelines(self.inner, &[create_info], None)
+        };
+        match result {
+            Ok(pipelines) => Ok(VkPipeline::from_pipeline(self.device, pipelines[0])),
+            Err((_pipelines, err)) => Err(err.into()),
+        }
+    }
+
+    pub fn create_compute_pipeline(
+        &self,
+        create_info: vk::ComputePipelineCreateInfo,
+    ) -> Result<VkPipeline> {
+        let result = unsafe {
+            self.device
+                .create_compute_pipelines(self.inner, &[create_info], None)
+        };
+        match result {
+            Ok(pipelines) => Ok(VkPipeline::from_pipeline(self.device, pipelines[0])),
+            Err((_pipelines, err)) => Err(err.into()),
+        }
     }
 }
 
