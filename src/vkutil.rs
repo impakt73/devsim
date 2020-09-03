@@ -632,6 +632,303 @@ impl<'a> Drop for VkImage<'a> {
     }
 }
 
+pub struct VkImageView<'a> {
+    inner: vk::ImageView,
+    device: &'a ash::Device,
+}
+
+impl<'a> VkImageView<'a> {
+    pub fn new(device: &'a ash::Device, create_info: &vk::ImageViewCreateInfo) -> Result<Self> {
+        let inner = unsafe { device.create_image_view(create_info, None)? };
+        Ok(VkImageView { inner, device })
+    }
+
+    pub fn raw(&self) -> vk::ImageView {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkImageView<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_image_view(self.inner, None);
+        }
+    }
+}
+
+pub struct VkSampler<'a> {
+    inner: vk::Sampler,
+    device: &'a ash::Device,
+}
+
+impl<'a> VkSampler<'a> {
+    pub fn new(device: &'a ash::Device, create_info: &vk::SamplerCreateInfo) -> Result<Self> {
+        let inner = unsafe { device.create_sampler(create_info, None)? };
+        Ok(VkSampler { inner, device })
+    }
+
+    pub fn raw(&self) -> vk::Sampler {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkSampler<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_sampler(self.inner, None);
+        }
+    }
+}
+
+pub struct VkCommandPool<'a> {
+    inner: vk::CommandPool,
+    device: &'a ash::Device,
+}
+
+impl<'a> VkCommandPool<'a> {
+    pub fn new(device: &'a ash::Device, create_info: &vk::CommandPoolCreateInfo) -> Result<Self> {
+        let inner = unsafe { device.create_command_pool(create_info, None)? };
+        Ok(VkCommandPool { inner, device })
+    }
+
+    pub fn raw(&self) -> vk::CommandPool {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkCommandPool<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_command_pool(self.inner, None);
+        }
+    }
+}
+
+pub struct VkSemaphore<'a> {
+    inner: vk::Semaphore,
+    device: &'a ash::Device,
+}
+
+impl<'a> VkSemaphore<'a> {
+    pub fn new(device: &'a ash::Device, create_info: &vk::SemaphoreCreateInfo) -> Result<Self> {
+        let inner = unsafe { device.create_semaphore(create_info, None)? };
+        Ok(VkSemaphore { inner, device })
+    }
+
+    pub fn raw(&self) -> vk::Semaphore {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkSemaphore<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_semaphore(self.inner, None);
+        }
+    }
+}
+
+pub struct VkFence<'a> {
+    inner: vk::Fence,
+    device: &'a ash::Device,
+}
+
+impl<'a> VkFence<'a> {
+    pub fn new(device: &'a ash::Device, create_info: &vk::FenceCreateInfo) -> Result<Self> {
+        let inner = unsafe { device.create_fence(create_info, None)? };
+        Ok(VkFence { inner, device })
+    }
+
+    pub fn raw(&self) -> vk::Fence {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkFence<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_fence(self.inner, None);
+        }
+    }
+}
+
+pub struct VkDescriptorSetLayout<'a> {
+    inner: vk::DescriptorSetLayout,
+    device: &'a ash::Device,
+}
+
+impl<'a> VkDescriptorSetLayout<'a> {
+    pub fn new(
+        device: &'a ash::Device,
+        create_info: &vk::DescriptorSetLayoutCreateInfo,
+    ) -> Result<Self> {
+        let inner = unsafe { device.create_descriptor_set_layout(create_info, None)? };
+        Ok(VkDescriptorSetLayout { inner, device })
+    }
+
+    pub fn raw(&self) -> vk::DescriptorSetLayout {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkDescriptorSetLayout<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_descriptor_set_layout(self.inner, None);
+        }
+    }
+}
+
+pub struct VkPipelineLayout<'a> {
+    inner: vk::PipelineLayout,
+    device: &'a ash::Device,
+}
+
+impl<'a> VkPipelineLayout<'a> {
+    pub fn new(
+        device: &'a ash::Device,
+        create_info: &vk::PipelineLayoutCreateInfo,
+    ) -> Result<Self> {
+        let inner = unsafe { device.create_pipeline_layout(create_info, None)? };
+        Ok(VkPipelineLayout { inner, device })
+    }
+
+    pub fn raw(&self) -> vk::PipelineLayout {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkPipelineLayout<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_pipeline_layout(self.inner, None);
+        }
+    }
+}
+
+pub struct VkDescriptorPool<'a> {
+    inner: vk::DescriptorPool,
+    device: &'a ash::Device,
+}
+
+impl<'a> VkDescriptorPool<'a> {
+    pub fn new(
+        device: &'a ash::Device,
+        create_info: &vk::DescriptorPoolCreateInfo,
+    ) -> Result<Self> {
+        let inner = unsafe { device.create_descriptor_pool(create_info, None)? };
+        Ok(VkDescriptorPool { inner, device })
+    }
+
+    pub fn raw(&self) -> vk::DescriptorPool {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkDescriptorPool<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_descriptor_pool(self.inner, None);
+        }
+    }
+}
+
+pub struct VkShaderModule<'a> {
+    inner: vk::ShaderModule,
+    device: &'a ash::Device,
+}
+
+impl<'a> VkShaderModule<'a> {
+    pub fn new(device: &'a ash::Device, create_info: &vk::ShaderModuleCreateInfo) -> Result<Self> {
+        let inner = unsafe { device.create_shader_module(create_info, None)? };
+        Ok(VkShaderModule { inner, device })
+    }
+
+    pub fn raw(&self) -> vk::ShaderModule {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkShaderModule<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_shader_module(self.inner, None);
+        }
+    }
+}
+
+pub struct VkPipelineCache<'a> {
+    inner: vk::PipelineCache,
+    device: &'a ash::Device,
+}
+
+impl<'a> VkPipelineCache<'a> {
+    pub fn new(device: &'a ash::Device, create_info: &vk::PipelineCacheCreateInfo) -> Result<Self> {
+        let inner = unsafe { device.create_pipeline_cache(create_info, None)? };
+        Ok(VkPipelineCache { inner, device })
+    }
+
+    pub fn raw(&self) -> vk::PipelineCache {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkPipelineCache<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_pipeline_cache(self.inner, None);
+        }
+    }
+}
+
+pub struct VkRenderPass<'a> {
+    inner: vk::RenderPass,
+    device: &'a ash::Device,
+}
+
+impl<'a> VkRenderPass<'a> {
+    pub fn new(device: &'a ash::Device, create_info: &vk::RenderPassCreateInfo) -> Result<Self> {
+        let inner = unsafe { device.create_render_pass(create_info, None)? };
+        Ok(VkRenderPass { inner, device })
+    }
+
+    pub fn raw(&self) -> vk::RenderPass {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkRenderPass<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_render_pass(self.inner, None);
+        }
+    }
+}
+
+pub struct VkFramebuffer<'a> {
+    inner: vk::Framebuffer,
+    device: &'a ash::Device,
+}
+
+impl<'a> VkFramebuffer<'a> {
+    pub fn new(device: &'a ash::Device, create_info: &vk::FramebufferCreateInfo) -> Result<Self> {
+        let inner = unsafe { device.create_framebuffer(create_info, None)? };
+        Ok(VkFramebuffer { inner, device })
+    }
+
+    pub fn raw(&self) -> vk::Framebuffer {
+        self.inner
+    }
+}
+
+impl<'a> Drop for VkFramebuffer<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_framebuffer(self.inner, None);
+        }
+    }
+}
+
 // Wrapper structure used to load and manage a logical Vulkan device
 pub struct RenderDevice {
     pub allocator: vk_mem::Allocator,
