@@ -695,17 +695,24 @@ impl<'a> VkCommandPool<'a> {
         self.inner
     }
 
-    pub fn allocate_cmd_buffers(
+    pub fn allocate_command_buffer(
         &self,
-        create_info: &vk::CommandBufferAllocateInfo,
-    ) -> Result<Vec<vk::CommandBuffer>> {
-        let result = unsafe { self.device.allocate_command_buffers(create_info)? };
-        Ok(result)
+        level: vk::CommandBufferLevel,
+    ) -> Result<vk::CommandBuffer> {
+        let result = unsafe {
+            self.device.allocate_command_buffers(
+                &vk::CommandBufferAllocateInfo::builder()
+                    .command_pool(self.inner)
+                    .level(level)
+                    .command_buffer_count(1),
+            )?
+        };
+        Ok(result[0])
     }
 
-    pub fn free_cmd_buffers(&self, cmd_buffers: &[vk::CommandBuffer]) {
+    pub fn free_command_buffer(&self, cmd_buffer: vk::CommandBuffer) {
         unsafe {
-            self.device.free_command_buffers(self.inner, cmd_buffers);
+            self.device.free_command_buffers(self.inner, &[cmd_buffer]);
         }
     }
 }
@@ -838,18 +845,24 @@ impl<'a> VkDescriptorPool<'a> {
         self.inner
     }
 
-    pub fn allocate_descriptor_sets(
+    pub fn allocate_descriptor_set(
         &self,
-        create_info: &vk::DescriptorSetAllocateInfo,
-    ) -> Result<Vec<vk::DescriptorSet>> {
-        let result = unsafe { self.device.allocate_descriptor_sets(create_info)? };
-        Ok(result)
+        layout: vk::DescriptorSetLayout,
+    ) -> Result<vk::DescriptorSet> {
+        let result = unsafe {
+            self.device.allocate_descriptor_sets(
+                &vk::DescriptorSetAllocateInfo::builder()
+                    .descriptor_pool(self.inner)
+                    .set_layouts(&[layout]),
+            )?
+        };
+        Ok(result[0])
     }
 
-    pub fn free_descriptor_sets(&self, descriptor_sets: &[vk::DescriptorSet]) {
+    pub fn free_descriptor_set(&self, descriptor_set: vk::DescriptorSet) {
         unsafe {
             self.device
-                .free_descriptor_sets(self.inner, descriptor_sets);
+                .free_descriptor_sets(self.inner, &[descriptor_set]);
         }
     }
 }
@@ -926,11 +939,11 @@ impl<'a> VkPipelineCache<'a> {
 
     pub fn create_graphics_pipeline(
         &self,
-        create_info: vk::GraphicsPipelineCreateInfo,
+        create_info: &vk::GraphicsPipelineCreateInfo,
     ) -> Result<VkPipeline> {
         let result = unsafe {
             self.device
-                .create_graphics_pipelines(self.inner, &[create_info], None)
+                .create_graphics_pipelines(self.inner, &[*create_info], None)
         };
         match result {
             Ok(pipelines) => Ok(VkPipeline::from_pipeline(self.device, pipelines[0])),
@@ -940,11 +953,11 @@ impl<'a> VkPipelineCache<'a> {
 
     pub fn create_compute_pipeline(
         &self,
-        create_info: vk::ComputePipelineCreateInfo,
+        create_info: &vk::ComputePipelineCreateInfo,
     ) -> Result<VkPipeline> {
         let result = unsafe {
             self.device
-                .create_compute_pipelines(self.inner, &[create_info], None)
+                .create_compute_pipelines(self.inner, &[*create_info], None)
         };
         match result {
             Ok(pipelines) => Ok(VkPipeline::from_pipeline(self.device, pipelines[0])),
