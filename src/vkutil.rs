@@ -694,6 +694,20 @@ impl<'a> VkCommandPool<'a> {
     pub fn raw(&self) -> vk::CommandPool {
         self.inner
     }
+
+    pub fn allocate_cmd_buffers(
+        &self,
+        create_info: &vk::CommandBufferAllocateInfo,
+    ) -> Result<Vec<vk::CommandBuffer>> {
+        let result = unsafe { self.device.allocate_command_buffers(create_info)? };
+        Ok(result)
+    }
+
+    pub fn free_cmd_buffers(&self, cmd_buffers: &[vk::CommandBuffer]) {
+        unsafe {
+            self.device.free_command_buffers(self.inner, cmd_buffers);
+        }
+    }
 }
 
 impl<'a> Drop for VkCommandPool<'a> {
@@ -822,6 +836,21 @@ impl<'a> VkDescriptorPool<'a> {
 
     pub fn raw(&self) -> vk::DescriptorPool {
         self.inner
+    }
+
+    pub fn allocate_descriptor_sets(
+        &self,
+        create_info: &vk::DescriptorSetAllocateInfo,
+    ) -> Result<Vec<vk::DescriptorSet>> {
+        let result = unsafe { self.device.allocate_descriptor_sets(create_info)? };
+        Ok(result)
+    }
+
+    pub fn free_descriptor_sets(&self, descriptor_sets: &[vk::DescriptorSet]) {
+        unsafe {
+            self.device
+                .free_descriptor_sets(self.inner, descriptor_sets);
+        }
     }
 }
 
