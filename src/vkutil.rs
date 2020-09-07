@@ -441,6 +441,7 @@ impl VkSwapchain {
         device: &VkDevice,
         width: u32,
         height: u32,
+        old_swapchain: Option<&VkSwapchain>,
     ) -> Result<Self> {
         unsafe {
             let surface_formats = surface
@@ -508,6 +509,12 @@ impl VkSwapchain {
             };
             let ext = khr::Swapchain::new(&instance.inner, &*device.inner);
 
+            let old_swapchain_handle = if let Some(old_swapchain) = old_swapchain {
+                old_swapchain.inner
+            } else {
+                vk::SwapchainKHR::null()
+            };
+
             let swapchain_create_info = vk::SwapchainCreateInfoKHR::builder()
                 .surface(surface.inner)
                 .min_image_count(desired_image_count)
@@ -520,7 +527,8 @@ impl VkSwapchain {
                 .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
                 .present_mode(present_mode)
                 .clipped(true)
-                .image_array_layers(1);
+                .image_array_layers(1)
+                .old_swapchain(old_swapchain_handle);
 
             let swapchain = ext.create_swapchain(&swapchain_create_info, None)?;
 

@@ -194,6 +194,7 @@ impl Renderer {
             &device,
             window.inner_size().width,
             window.inner_size().height,
+            None,
         )?;
 
         let surface_format = swapchain.surface_format;
@@ -497,6 +498,81 @@ impl Renderer {
         &self.frame_states[frame_index]
     }
 
+    fn recreate_swapchain(&mut self, window: &winit::window::Window) -> Result<()> {
+        println!(
+            "Recreating {}x{} swapchain!",
+            window.inner_size().width,
+            window.inner_size().height
+        );
+
+        // Make sure all previous rendering work is completed before we destroy the old swapchain resources
+        self.wait_for_idle();
+
+        let swapchain = VkSwapchain::new(
+            &self.instance,
+            &self.surface,
+            &self.device,
+            window.inner_size().width,
+            window.inner_size().height,
+            Some(&self.swapchain),
+        )?;
+
+        let surface_format = swapchain.surface_format;
+        let surface_resolution = swapchain.surface_resolution;
+
+        let swapchain_image_views = swapchain
+            .images
+            .iter()
+            .map(|image| {
+                VkImageView::new(
+                    self.device.raw(),
+                    &vk::ImageViewCreateInfo::builder()
+                        .image(*image)
+                        .view_type(vk::ImageViewType::TYPE_2D)
+                        .format(surface_format.format)
+                        .components(
+                            vk::ComponentMapping::builder()
+                                .r(vk::ComponentSwizzle::IDENTITY)
+                                .g(vk::ComponentSwizzle::IDENTITY)
+                                .b(vk::ComponentSwizzle::IDENTITY)
+                                .a(vk::ComponentSwizzle::IDENTITY)
+                                .build(),
+                        )
+                        .subresource_range(
+                            vk::ImageSubresourceRange::builder()
+                                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                .base_mip_level(0)
+                                .level_count(1)
+                                .base_array_layer(0)
+                                .layer_count(1)
+                                .build(),
+                        ),
+                )
+            })
+            .collect::<Result<Vec<VkImageView>>>()?;
+
+        let framebuffers = swapchain_image_views
+            .iter()
+            .map(|image_view| {
+                VkFramebuffer::new(
+                    self.device.raw(),
+                    &vk::FramebufferCreateInfo::builder()
+                        .render_pass(self.renderpass.raw())
+                        .attachments(&[image_view.raw()])
+                        .width(surface_resolution.width)
+                        .height(surface_resolution.height)
+                        .layers(1),
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        self.swapchain_image_views = swapchain_image_views;
+        self.framebuffers = framebuffers;
+        self.swapchain = swapchain;
+
+        Ok(())
+    }
+
     fn begin_frame(&mut self) -> vk::CommandBuffer {
         unsafe {
             // Acquire the current swapchain image index
@@ -509,6 +585,9 @@ impl Renderer {
                     None,
                 )
                 .unwrap();
+            // TODO: This should never happen since we're already handling window resize events, but this could be handled
+            // more robustly in the future.
+            assert!(!_is_suboptimal);
             self.cur_swapchain_idx = image_index as usize;
 
             let frame_state = self.get_cur_frame_state();
@@ -606,13 +685,17 @@ impl Renderer {
                 .queue_submit(self.device.present_queue(), &[submit_info], fence.raw())
                 .unwrap();
 
-            self.swapchain
+            let _is_suboptimal = self
+                .swapchain
                 .present_image(
                     self.cur_swapchain_idx as u32,
                     &signal_semaphores,
                     self.device.present_queue(),
                 )
                 .unwrap();
+            // TODO: This should never happen since we're already handling window resize events, but this could be handled
+            // more robustly in the future.
+            assert!(!_is_suboptimal);
 
             self.cur_frame_idx = (self.cur_frame_idx + 1) % self.swapchain.images.len();
         }
@@ -669,6 +752,13 @@ pub fn show(elf_path: &impl AsRef<Path>) -> ! {
             }
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                WindowEvent::Resized(_new_size) => {
+                    // TODO: This code needs to be updated to properly handle minimized windows
+                    //       When a window is minimized, it resizes to 0x0 which causes all sorts of problems
+                    //       inside the graphics api. This basically results in crashes on minimize. :/
+                    //       This will be fixed in a future change.
+                    renderer.recreate_swapchain(&window).unwrap();
+                }
                 _ => (),
             },
             Event::DeviceEvent { event, .. } => match event {
