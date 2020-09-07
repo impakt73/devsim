@@ -432,7 +432,6 @@ pub struct VkSwapchain {
     pub surface_format: vk::SurfaceFormatKHR,
     pub surface_resolution: vk::Extent2D,
     pub images: Vec<vk::Image>,
-    pub image_views: Vec<VkImageView>,
 }
 
 impl VkSwapchain {
@@ -526,35 +525,6 @@ impl VkSwapchain {
             let swapchain = ext.create_swapchain(&swapchain_create_info, None)?;
 
             let images = ext.get_swapchain_images(swapchain)?;
-            let image_views = images
-                .iter()
-                .map(|image| {
-                    VkImageView::new(
-                        device.raw(),
-                        &vk::ImageViewCreateInfo::builder()
-                            .image(*image)
-                            .view_type(vk::ImageViewType::TYPE_2D)
-                            .format(surface_format.format)
-                            .components(
-                                vk::ComponentMapping::builder()
-                                    .r(vk::ComponentSwizzle::IDENTITY)
-                                    .g(vk::ComponentSwizzle::IDENTITY)
-                                    .b(vk::ComponentSwizzle::IDENTITY)
-                                    .a(vk::ComponentSwizzle::IDENTITY)
-                                    .build(),
-                            )
-                            .subresource_range(
-                                vk::ImageSubresourceRange::builder()
-                                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                                    .base_mip_level(0)
-                                    .level_count(1)
-                                    .base_array_layer(0)
-                                    .layer_count(1)
-                                    .build(),
-                            ),
-                    )
-                })
-                .collect::<Result<Vec<VkImageView>>>()?;
 
             Ok(Self {
                 inner: swapchain,
@@ -562,7 +532,6 @@ impl VkSwapchain {
                 surface_format,
                 surface_resolution,
                 images,
-                image_views,
             })
         }
     }

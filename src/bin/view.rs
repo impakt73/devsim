@@ -27,7 +27,6 @@ fn select_physical_device(physical_devices: &[vk::PhysicalDevice]) -> vk::Physic
 struct FrameState {
     fb_image_view: VkImageView,
     fb_image: VkImage,
-    framebuffer: VkFramebuffer,
     cmd_buffer: vk::CommandBuffer,
     fence: VkFence,
     descriptor_set: vk::DescriptorSet,
@@ -38,26 +37,12 @@ impl FrameState {
     fn new(
         device: &VkDevice,
         allocator: Weak<vk_mem::Allocator>,
-        renderpass: &VkRenderPass,
-        swapchain_image_view: vk::ImageView,
-        surface_width: u32,
-        surface_height: u32,
         command_pool: &VkCommandPool,
         descriptor_pool: &VkDescriptorPool,
         descriptor_set_layout: &VkDescriptorSetLayout,
         fb_width: u32,
         fb_height: u32,
     ) -> Result<Self> {
-        let framebuffer = VkFramebuffer::new(
-            device.raw(),
-            &vk::FramebufferCreateInfo::builder()
-                .render_pass(renderpass.raw())
-                .attachments(&[swapchain_image_view])
-                .width(surface_width)
-                .height(surface_height)
-                .layers(1),
-        )?;
-
         let cmd_buffer = command_pool.allocate_command_buffer(vk::CommandBufferLevel::PRIMARY)?;
 
         let rendering_finished_semaphore =
@@ -136,7 +121,6 @@ impl FrameState {
         Ok(FrameState {
             fb_image_view,
             fb_image,
-            framebuffer,
             cmd_buffer,
             fence,
             descriptor_set,
@@ -149,6 +133,7 @@ struct Renderer {
     frame_states: Vec<FrameState>,
     fb_upload_buffer: VkBuffer,
     image_available_semaphores: Vec<VkSemaphore>,
+    framebuffers: Vec<VkFramebuffer>,
     renderpass: VkRenderPass,
     cmd_pool: VkCommandPool,
     sampler: VkSampler,
@@ -159,6 +144,7 @@ struct Renderer {
     pipeline_cache: VkPipelineCache,
     cur_frame_idx: usize,
     cur_swapchain_idx: usize,
+    swapchain_image_views: Vec<VkImageView>,
     swapchain: VkSwapchain,
     allocator: Arc<vk_mem::Allocator>,
     surface: VkSurface,
@@ -201,6 +187,7 @@ impl Renderer {
 
         let pipeline_cache =
             VkPipelineCache::new(device.raw(), &vk::PipelineCacheCreateInfo::default())?;
+
         let swapchain = VkSwapchain::new(
             &instance,
             &surface,
@@ -213,6 +200,38 @@ impl Renderer {
         let surface_resolution = swapchain.surface_resolution;
         let desired_image_count = swapchain.images.len() as u32;
         let queue_family_index = 0;
+
+        let swapchain_image_views = swapchain
+            .images
+            .iter()
+            .map(|image| {
+                VkImageView::new(
+                    device.raw(),
+                    &vk::ImageViewCreateInfo::builder()
+                        .image(*image)
+                        .view_type(vk::ImageViewType::TYPE_2D)
+                        .format(surface_format.format)
+                        .components(
+                            vk::ComponentMapping::builder()
+                                .r(vk::ComponentSwizzle::IDENTITY)
+                                .g(vk::ComponentSwizzle::IDENTITY)
+                                .b(vk::ComponentSwizzle::IDENTITY)
+                                .a(vk::ComponentSwizzle::IDENTITY)
+                                .build(),
+                        )
+                        .subresource_range(
+                            vk::ImageSubresourceRange::builder()
+                                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                .base_mip_level(0)
+                                .level_count(1)
+                                .base_array_layer(0)
+                                .layer_count(1)
+                                .build(),
+                        ),
+                )
+            })
+            .collect::<Result<Vec<VkImageView>>>()?;
+
         let renderpass = VkRenderPass::new(
             device.raw(),
             &vk::RenderPassCreateInfo::builder()
@@ -234,6 +253,21 @@ impl Renderer {
                         .build()])
                     .build()]),
         )?;
+
+        let framebuffers = swapchain_image_views
+            .iter()
+            .map(|image_view| {
+                VkFramebuffer::new(
+                    device.raw(),
+                    &vk::FramebufferCreateInfo::builder()
+                        .render_pass(renderpass.raw())
+                        .attachments(&[image_view.raw()])
+                        .width(surface_resolution.width)
+                        .height(surface_resolution.height)
+                        .layers(1),
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         let cmd_pool = VkCommandPool::new(
             device.raw(),
@@ -395,17 +429,12 @@ impl Renderer {
                 .subpass(0),
         )?;
 
-        let frame_states = swapchain
-            .image_views
+        let frame_states = swapchain_image_views
             .iter()
-            .map(|image_view| {
+            .map(|_image_view| {
                 FrameState::new(
                     &device,
                     Arc::downgrade(&allocator),
-                    &renderpass,
-                    image_view.raw(),
-                    surface_resolution.width,
-                    surface_resolution.height,
                     &cmd_pool,
                     &descriptor_pool,
                     &descriptor_set_layout,
@@ -438,6 +467,7 @@ impl Renderer {
         Ok(Renderer {
             frame_states,
             fb_upload_buffer,
+            framebuffers,
             image_available_semaphores,
             renderpass,
             cmd_pool,
@@ -449,6 +479,7 @@ impl Renderer {
             pipeline_cache,
             cur_frame_idx: 0,
             cur_swapchain_idx: 0,
+            swapchain_image_views,
             swapchain,
             allocator,
             surface,
@@ -505,12 +536,13 @@ impl Renderer {
 
     fn begin_render(&self) {
         let frame_state = self.get_cur_frame_state();
+        let framebuffer = &self.framebuffers[self.cur_swapchain_idx];
         unsafe {
             self.device.raw().upgrade().unwrap().cmd_begin_render_pass(
                 frame_state.cmd_buffer,
                 &vk::RenderPassBeginInfo::builder()
                     .render_pass(self.renderpass.raw())
-                    .framebuffer(frame_state.framebuffer.raw())
+                    .framebuffer(framebuffer.raw())
                     .render_area(
                         vk::Rect2D::builder()
                             .extent(self.swapchain.surface_resolution)
