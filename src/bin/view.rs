@@ -359,21 +359,8 @@ impl Renderer {
                 .vertex_input_state(&vk::PipelineVertexInputStateCreateInfo::builder().build())
                 .viewport_state(
                     &vk::PipelineViewportStateCreateInfo::builder()
-                        .viewports(&[vk::Viewport::builder()
-                            .x(0.0)
-                            .y(0.0)
-                            .width(surface_resolution.width as f32)
-                            .height(surface_resolution.height as f32)
-                            .build()])
-                        .scissors(&[vk::Rect2D::builder()
-                            .offset(vk::Offset2D::builder().x(0).y(0).build())
-                            .extent(
-                                vk::Extent2D::builder()
-                                    .width(surface_resolution.width)
-                                    .height(surface_resolution.height)
-                                    .build(),
-                            )
-                            .build()]),
+                        .viewports(&[vk::Viewport::default()])
+                        .scissors(&[vk::Rect2D::default()]),
                 )
                 .rasterization_state(
                     &vk::PipelineRasterizationStateCreateInfo::builder()
@@ -398,6 +385,10 @@ impl Renderer {
                             )
                             .build(),
                     ]),
+                )
+                .dynamic_state(
+                    &vk::PipelineDynamicStateCreateInfo::builder()
+                        .dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]),
                 )
                 .layout(pipeline_layout.raw())
                 .render_pass(renderpass.raw())
@@ -789,6 +780,31 @@ pub fn show(elf_path: &impl AsRef<Path>) -> ! {
                     cmd_buffer,
                     vk::PipelineBindPoint::GRAPHICS,
                     renderer.gfx_pipeline.raw(),
+                );
+
+                device.cmd_set_viewport(
+                    cmd_buffer,
+                    0,
+                    &[vk::Viewport::builder()
+                        .x(0.0)
+                        .y(0.0)
+                        .width(window.inner_size().width as f32)
+                        .height(window.inner_size().height as f32)
+                        .build()],
+                );
+
+                device.cmd_set_scissor(
+                    cmd_buffer,
+                    0,
+                    &[vk::Rect2D::builder()
+                        .offset(vk::Offset2D::builder().x(0).y(0).build())
+                        .extent(
+                            vk::Extent2D::builder()
+                                .width(window.inner_size().width)
+                                .height(window.inner_size().height)
+                                .build(),
+                        )
+                        .build()],
                 );
 
                 device.cmd_bind_descriptor_sets(
