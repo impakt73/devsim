@@ -5,6 +5,7 @@ use ash::{
 };
 use std::borrow::Cow;
 use std::ffi::{CStr, CString};
+use std::sync::{Arc, Weak};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -151,13 +152,13 @@ fn select_device_extensions() -> Vec<CString> {
     exts
 }
 
-struct VkSurface {
+pub struct VkSurface {
     inner: vk::SurfaceKHR,
     ext: khr::Surface,
 }
 
 impl VkSurface {
-    fn new(instance: &VkInstance, window: &winit::window::Window) -> Result<Self> {
+    pub fn new(instance: &VkInstance, window: &winit::window::Window) -> Result<Self> {
         unsafe {
             // Create a surface from winit window.
             let surface =
@@ -180,21 +181,14 @@ impl Drop for VkSurface {
     }
 }
 
-/// Selects a physical device from the provided list
-fn select_physical_device(physical_devices: &[vk::PhysicalDevice]) -> vk::PhysicalDevice {
-    // TODO: Support proper physical device selection
-    //       For now, we just use the first device
-    physical_devices[0]
-}
-
 // Wrapper structure used to create and manage a Vulkan instance
-struct VkInstance {
+pub struct VkInstance {
     inner: ash::Instance,
     entry: ash::Entry,
 }
 
 impl VkInstance {
-    fn new(window: &winit::window::Window, enable_validation: bool) -> Result<Self> {
+    pub fn new(window: &winit::window::Window, enable_validation: bool) -> Result<Self> {
         unsafe {
             let entry = ash::Entry::new()?;
             // Query all extensions required for swapchain usage
@@ -226,6 +220,10 @@ impl VkInstance {
             })
         }
     }
+
+    pub fn raw(&self) -> &ash::Instance {
+        &self.inner
+    }
 }
 
 impl Drop for VkInstance {
@@ -236,13 +234,13 @@ impl Drop for VkInstance {
     }
 }
 
-struct VkDebugMessenger {
+pub struct VkDebugMessenger {
     inner: vk::DebugUtilsMessengerEXT,
     debug_messenger_ext: ext::DebugUtils,
 }
 
 impl VkDebugMessenger {
-    fn new(instance: &VkInstance) -> Result<Self> {
+    pub fn new(instance: &VkInstance) -> Result<Self> {
         unsafe {
             let debug_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
                 .message_severity(
@@ -300,8 +298,21 @@ enum VkQueueType {
 }
 const VK_QUEUE_TYPE_COUNT: usize = 3;
 
-struct VkDevice {
-    inner: ash::Device,
+/// Helper function that unwraps a device
+fn unwrap_device(device: &Weak<ash::Device>) -> Arc<ash::Device> {
+    device
+        .upgrade()
+        .expect("Vulkan device destroyed while in use.")
+}
+/// Helper function that unwraps an allocator
+fn unwrap_allocator(allocator: &Weak<vk_mem::Allocator>) -> Arc<vk_mem::Allocator> {
+    allocator
+        .upgrade()
+        .expect("Vulkan allocator destroyed while in use.")
+}
+
+pub struct VkDevice {
+    inner: Arc<ash::Device>,
     physical_device: vk::PhysicalDevice,
     queues: Vec<vk::Queue>,
     queues_by_type: [vk::Queue; VK_QUEUE_TYPE_COUNT],
@@ -309,7 +320,7 @@ struct VkDevice {
 }
 
 impl VkDevice {
-    fn new(
+    pub fn new(
         instance: &VkInstance,
         physical_device: vk::PhysicalDevice,
         surface: &VkSurface,
@@ -377,7 +388,7 @@ impl VkDevice {
             let present_queue = queues[present_queue_family_index as usize];
 
             Ok(Self {
-                inner: device,
+                inner: Arc::new(device),
                 physical_device,
                 queues,
                 queues_by_type,
@@ -386,19 +397,23 @@ impl VkDevice {
         }
     }
 
-    fn graphics_queue(&self) -> vk::Queue {
+    pub fn raw(&self) -> Weak<ash::Device> {
+        Arc::downgrade(&self.inner)
+    }
+
+    pub fn graphics_queue(&self) -> vk::Queue {
         self.queues_by_type[VkQueueType::Graphics as usize]
     }
 
-    fn compute_queue(&self) -> vk::Queue {
+    pub fn compute_queue(&self) -> vk::Queue {
         self.queues_by_type[VkQueueType::Compute as usize]
     }
 
-    fn transfer_queue(&self) -> vk::Queue {
+    pub fn transfer_queue(&self) -> vk::Queue {
         self.queues_by_type[VkQueueType::Transfer as usize]
     }
 
-    fn present_queue(&self) -> vk::Queue {
+    pub fn present_queue(&self) -> vk::Queue {
         self.present_queue
     }
 }
@@ -416,13 +431,15 @@ pub struct VkSwapchain {
     ext: ash::extensions::khr::Swapchain,
     pub surface_format: vk::SurfaceFormatKHR,
     pub surface_resolution: vk::Extent2D,
+    pub images: Vec<vk::Image>,
+    pub image_views: Vec<VkImageView>,
 }
 
 impl VkSwapchain {
-    fn new(
+    pub fn new(
         instance: &VkInstance,
-        device: &VkDevice,
         surface: &VkSurface,
+        device: &VkDevice,
         width: u32,
         height: u32,
     ) -> Result<Self> {
@@ -490,7 +507,7 @@ impl VkSwapchain {
                 // Fall back to the required fifo mode if nothing else works
                 vk::PresentModeKHR::FIFO
             };
-            let ext = khr::Swapchain::new(&instance.inner, &device.inner);
+            let ext = khr::Swapchain::new(&instance.inner, &*device.inner);
 
             let swapchain_create_info = vk::SwapchainCreateInfoKHR::builder()
                 .surface(surface.inner)
@@ -508,11 +525,44 @@ impl VkSwapchain {
 
             let swapchain = ext.create_swapchain(&swapchain_create_info, None)?;
 
+            let images = ext.get_swapchain_images(swapchain)?;
+            let image_views = images
+                .iter()
+                .map(|image| {
+                    VkImageView::new(
+                        device.raw(),
+                        &vk::ImageViewCreateInfo::builder()
+                            .image(*image)
+                            .view_type(vk::ImageViewType::TYPE_2D)
+                            .format(surface_format.format)
+                            .components(
+                                vk::ComponentMapping::builder()
+                                    .r(vk::ComponentSwizzle::IDENTITY)
+                                    .g(vk::ComponentSwizzle::IDENTITY)
+                                    .b(vk::ComponentSwizzle::IDENTITY)
+                                    .a(vk::ComponentSwizzle::IDENTITY)
+                                    .build(),
+                            )
+                            .subresource_range(
+                                vk::ImageSubresourceRange::builder()
+                                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                    .base_mip_level(0)
+                                    .level_count(1)
+                                    .base_array_layer(0)
+                                    .layer_count(1)
+                                    .build(),
+                            ),
+                    )
+                })
+                .collect::<Result<Vec<VkImageView>>>()?;
+
             Ok(Self {
                 inner: swapchain,
                 ext,
                 surface_format,
                 surface_resolution,
+                images,
+                image_views,
             })
         }
     }
@@ -560,56 +610,62 @@ impl Drop for VkSwapchain {
     }
 }
 
-pub struct VkBuffer<'a> {
+pub struct VkBuffer {
     inner: vk::Buffer,
-    allocator: &'a vk_mem::Allocator,
+    allocator: Weak<vk_mem::Allocator>,
     allocation: vk_mem::Allocation,
+    allocation_info: vk_mem::AllocationInfo,
 }
 
-impl<'a> VkBuffer<'a> {
+impl VkBuffer {
     pub fn new(
-        allocator: &'a vk_mem::Allocator,
+        allocator: Weak<vk_mem::Allocator>,
         buffer_info: &vk::BufferCreateInfo,
-        allocation_info: &vk_mem::AllocationCreateInfo,
+        allocation_create_info: &vk_mem::AllocationCreateInfo,
     ) -> Result<Self> {
-        let (inner, allocation, _alloc_info) =
-            allocator.create_buffer(buffer_info, allocation_info)?;
+        let (inner, allocation, allocation_info) =
+            unwrap_allocator(&allocator).create_buffer(buffer_info, allocation_create_info)?;
         Ok(VkBuffer {
             inner,
             allocator,
             allocation,
+            allocation_info,
         })
     }
 
     pub fn raw(&self) -> vk::Buffer {
         self.inner
     }
+
+    pub fn info(&self) -> &vk_mem::AllocationInfo {
+        &self.allocation_info
+    }
 }
 
-impl<'a> Drop for VkBuffer<'a> {
+impl Drop for VkBuffer {
     fn drop(&mut self) {
         // TODO: This function always returns a successful result and should be modified to not
         //       return anything.
-        self.allocator
+        unwrap_allocator(&self.allocator)
             .destroy_buffer(self.inner, &self.allocation)
             .unwrap();
     }
 }
 
-pub struct VkImage<'a> {
+pub struct VkImage {
     inner: vk::Image,
-    allocator: &'a vk_mem::Allocator,
+    allocator: Weak<vk_mem::Allocator>,
     allocation: vk_mem::Allocation,
 }
 
-impl<'a> VkImage<'a> {
+impl VkImage {
     pub fn new(
-        allocator: &'a vk_mem::Allocator,
+        allocator: Weak<vk_mem::Allocator>,
         image_info: &vk::ImageCreateInfo,
         allocation_info: &vk_mem::AllocationCreateInfo,
     ) -> Result<Self> {
         let (inner, allocation, _alloc_info) =
-            allocator.create_image(image_info, allocation_info)?;
+            unwrap_allocator(&allocator).create_image(image_info, allocation_info)?;
         Ok(VkImage {
             inner,
             allocator,
@@ -622,24 +678,24 @@ impl<'a> VkImage<'a> {
     }
 }
 
-impl<'a> Drop for VkImage<'a> {
+impl Drop for VkImage {
     fn drop(&mut self) {
         // TODO: This function always returns a successful result and should be modified to not
         //       return anything.
-        self.allocator
+        unwrap_allocator(&self.allocator)
             .destroy_image(self.inner, &self.allocation)
             .unwrap();
     }
 }
 
-pub struct VkImageView<'a> {
+pub struct VkImageView {
     inner: vk::ImageView,
-    device: &'a ash::Device,
+    device: Weak<ash::Device>,
 }
 
-impl<'a> VkImageView<'a> {
-    pub fn new(device: &'a ash::Device, create_info: &vk::ImageViewCreateInfo) -> Result<Self> {
-        let inner = unsafe { device.create_image_view(create_info, None)? };
+impl VkImageView {
+    pub fn new(device: Weak<ash::Device>, create_info: &vk::ImageViewCreateInfo) -> Result<Self> {
+        let inner = unsafe { unwrap_device(&device).create_image_view(create_info, None)? };
         Ok(VkImageView { inner, device })
     }
 
@@ -648,22 +704,22 @@ impl<'a> VkImageView<'a> {
     }
 }
 
-impl<'a> Drop for VkImageView<'a> {
+impl Drop for VkImageView {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_image_view(self.inner, None);
+            unwrap_device(&self.device).destroy_image_view(self.inner, None);
         }
     }
 }
 
-pub struct VkSampler<'a> {
+pub struct VkSampler {
     inner: vk::Sampler,
-    device: &'a ash::Device,
+    device: Weak<ash::Device>,
 }
 
-impl<'a> VkSampler<'a> {
-    pub fn new(device: &'a ash::Device, create_info: &vk::SamplerCreateInfo) -> Result<Self> {
-        let inner = unsafe { device.create_sampler(create_info, None)? };
+impl VkSampler {
+    pub fn new(device: Weak<ash::Device>, create_info: &vk::SamplerCreateInfo) -> Result<Self> {
+        let inner = unsafe { unwrap_device(&device).create_sampler(create_info, None)? };
         Ok(VkSampler { inner, device })
     }
 
@@ -672,22 +728,22 @@ impl<'a> VkSampler<'a> {
     }
 }
 
-impl<'a> Drop for VkSampler<'a> {
+impl Drop for VkSampler {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_sampler(self.inner, None);
+            unwrap_device(&self.device).destroy_sampler(self.inner, None);
         }
     }
 }
 
-pub struct VkCommandPool<'a> {
+pub struct VkCommandPool {
     inner: vk::CommandPool,
-    device: &'a ash::Device,
+    device: Weak<ash::Device>,
 }
 
-impl<'a> VkCommandPool<'a> {
-    pub fn new(device: &'a ash::Device, create_info: &vk::CommandPoolCreateInfo) -> Result<Self> {
-        let inner = unsafe { device.create_command_pool(create_info, None)? };
+impl VkCommandPool {
+    pub fn new(device: Weak<ash::Device>, create_info: &vk::CommandPoolCreateInfo) -> Result<Self> {
+        let inner = unsafe { unwrap_device(&device).create_command_pool(create_info, None)? };
         Ok(VkCommandPool { inner, device })
     }
 
@@ -700,7 +756,7 @@ impl<'a> VkCommandPool<'a> {
         level: vk::CommandBufferLevel,
     ) -> Result<vk::CommandBuffer> {
         let result = unsafe {
-            self.device.allocate_command_buffers(
+            unwrap_device(&self.device).allocate_command_buffers(
                 &vk::CommandBufferAllocateInfo::builder()
                     .command_pool(self.inner)
                     .level(level)
@@ -712,27 +768,27 @@ impl<'a> VkCommandPool<'a> {
 
     pub fn free_command_buffer(&self, cmd_buffer: vk::CommandBuffer) {
         unsafe {
-            self.device.free_command_buffers(self.inner, &[cmd_buffer]);
+            unwrap_device(&self.device).free_command_buffers(self.inner, &[cmd_buffer]);
         }
     }
 }
 
-impl<'a> Drop for VkCommandPool<'a> {
+impl Drop for VkCommandPool {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_command_pool(self.inner, None);
+            unwrap_device(&self.device).destroy_command_pool(self.inner, None);
         }
     }
 }
 
-pub struct VkSemaphore<'a> {
+pub struct VkSemaphore {
     inner: vk::Semaphore,
-    device: &'a ash::Device,
+    device: Weak<ash::Device>,
 }
 
-impl<'a> VkSemaphore<'a> {
-    pub fn new(device: &'a ash::Device, create_info: &vk::SemaphoreCreateInfo) -> Result<Self> {
-        let inner = unsafe { device.create_semaphore(create_info, None)? };
+impl VkSemaphore {
+    pub fn new(device: Weak<ash::Device>, create_info: &vk::SemaphoreCreateInfo) -> Result<Self> {
+        let inner = unsafe { unwrap_device(&device).create_semaphore(create_info, None)? };
         Ok(VkSemaphore { inner, device })
     }
 
@@ -741,22 +797,22 @@ impl<'a> VkSemaphore<'a> {
     }
 }
 
-impl<'a> Drop for VkSemaphore<'a> {
+impl Drop for VkSemaphore {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_semaphore(self.inner, None);
+            unwrap_device(&self.device).destroy_semaphore(self.inner, None);
         }
     }
 }
 
-pub struct VkFence<'a> {
+pub struct VkFence {
     inner: vk::Fence,
-    device: &'a ash::Device,
+    device: Weak<ash::Device>,
 }
 
-impl<'a> VkFence<'a> {
-    pub fn new(device: &'a ash::Device, create_info: &vk::FenceCreateInfo) -> Result<Self> {
-        let inner = unsafe { device.create_fence(create_info, None)? };
+impl VkFence {
+    pub fn new(device: Weak<ash::Device>, create_info: &vk::FenceCreateInfo) -> Result<Self> {
+        let inner = unsafe { unwrap_device(&device).create_fence(create_info, None)? };
         Ok(VkFence { inner, device })
     }
 
@@ -765,25 +821,26 @@ impl<'a> VkFence<'a> {
     }
 }
 
-impl<'a> Drop for VkFence<'a> {
+impl Drop for VkFence {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_fence(self.inner, None);
+            unwrap_device(&self.device).destroy_fence(self.inner, None);
         }
     }
 }
 
-pub struct VkDescriptorSetLayout<'a> {
+pub struct VkDescriptorSetLayout {
     inner: vk::DescriptorSetLayout,
-    device: &'a ash::Device,
+    device: Weak<ash::Device>,
 }
 
-impl<'a> VkDescriptorSetLayout<'a> {
+impl VkDescriptorSetLayout {
     pub fn new(
-        device: &'a ash::Device,
+        device: Weak<ash::Device>,
         create_info: &vk::DescriptorSetLayoutCreateInfo,
     ) -> Result<Self> {
-        let inner = unsafe { device.create_descriptor_set_layout(create_info, None)? };
+        let inner =
+            unsafe { unwrap_device(&device).create_descriptor_set_layout(create_info, None)? };
         Ok(VkDescriptorSetLayout { inner, device })
     }
 
@@ -792,25 +849,25 @@ impl<'a> VkDescriptorSetLayout<'a> {
     }
 }
 
-impl<'a> Drop for VkDescriptorSetLayout<'a> {
+impl Drop for VkDescriptorSetLayout {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_descriptor_set_layout(self.inner, None);
+            unwrap_device(&self.device).destroy_descriptor_set_layout(self.inner, None);
         }
     }
 }
 
-pub struct VkPipelineLayout<'a> {
+pub struct VkPipelineLayout {
     inner: vk::PipelineLayout,
-    device: &'a ash::Device,
+    device: Weak<ash::Device>,
 }
 
-impl<'a> VkPipelineLayout<'a> {
+impl VkPipelineLayout {
     pub fn new(
-        device: &'a ash::Device,
+        device: Weak<ash::Device>,
         create_info: &vk::PipelineLayoutCreateInfo,
     ) -> Result<Self> {
-        let inner = unsafe { device.create_pipeline_layout(create_info, None)? };
+        let inner = unsafe { unwrap_device(&device).create_pipeline_layout(create_info, None)? };
         Ok(VkPipelineLayout { inner, device })
     }
 
@@ -819,25 +876,25 @@ impl<'a> VkPipelineLayout<'a> {
     }
 }
 
-impl<'a> Drop for VkPipelineLayout<'a> {
+impl Drop for VkPipelineLayout {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_pipeline_layout(self.inner, None);
+            unwrap_device(&self.device).destroy_pipeline_layout(self.inner, None);
         }
     }
 }
 
-pub struct VkDescriptorPool<'a> {
+pub struct VkDescriptorPool {
     inner: vk::DescriptorPool,
-    device: &'a ash::Device,
+    device: Weak<ash::Device>,
 }
 
-impl<'a> VkDescriptorPool<'a> {
+impl VkDescriptorPool {
     pub fn new(
-        device: &'a ash::Device,
+        device: Weak<ash::Device>,
         create_info: &vk::DescriptorPoolCreateInfo,
     ) -> Result<Self> {
-        let inner = unsafe { device.create_descriptor_pool(create_info, None)? };
+        let inner = unsafe { unwrap_device(&device).create_descriptor_pool(create_info, None)? };
         Ok(VkDescriptorPool { inner, device })
     }
 
@@ -850,7 +907,7 @@ impl<'a> VkDescriptorPool<'a> {
         layout: vk::DescriptorSetLayout,
     ) -> Result<vk::DescriptorSet> {
         let result = unsafe {
-            self.device.allocate_descriptor_sets(
+            unwrap_device(&self.device).allocate_descriptor_sets(
                 &vk::DescriptorSetAllocateInfo::builder()
                     .descriptor_pool(self.inner)
                     .set_layouts(&[layout]),
@@ -861,28 +918,30 @@ impl<'a> VkDescriptorPool<'a> {
 
     pub fn free_descriptor_set(&self, descriptor_set: vk::DescriptorSet) {
         unsafe {
-            self.device
-                .free_descriptor_sets(self.inner, &[descriptor_set]);
+            unwrap_device(&self.device).free_descriptor_sets(self.inner, &[descriptor_set]);
         }
     }
 }
 
-impl<'a> Drop for VkDescriptorPool<'a> {
+impl Drop for VkDescriptorPool {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_descriptor_pool(self.inner, None);
+            unwrap_device(&self.device).destroy_descriptor_pool(self.inner, None);
         }
     }
 }
 
-pub struct VkShaderModule<'a> {
+pub struct VkShaderModule {
     inner: vk::ShaderModule,
-    device: &'a ash::Device,
+    device: Weak<ash::Device>,
 }
 
-impl<'a> VkShaderModule<'a> {
-    pub fn new(device: &'a ash::Device, create_info: &vk::ShaderModuleCreateInfo) -> Result<Self> {
-        let inner = unsafe { device.create_shader_module(create_info, None)? };
+impl VkShaderModule {
+    pub fn new(
+        device: Weak<ash::Device>,
+        create_info: &vk::ShaderModuleCreateInfo,
+    ) -> Result<Self> {
+        let inner = unsafe { unwrap_device(&device).create_shader_module(create_info, None)? };
         Ok(VkShaderModule { inner, device })
     }
 
@@ -891,21 +950,21 @@ impl<'a> VkShaderModule<'a> {
     }
 }
 
-impl<'a> Drop for VkShaderModule<'a> {
+impl Drop for VkShaderModule {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_shader_module(self.inner, None);
+            unwrap_device(&self.device).destroy_shader_module(self.inner, None);
         }
     }
 }
 
-pub struct VkPipeline<'a> {
+pub struct VkPipeline {
     inner: vk::Pipeline,
-    device: &'a ash::Device,
+    device: Weak<ash::Device>,
 }
 
-impl<'a> VkPipeline<'a> {
-    fn from_pipeline(device: &'a ash::Device, inner: vk::Pipeline) -> Self {
+impl VkPipeline {
+    fn from_pipeline(device: Weak<ash::Device>, inner: vk::Pipeline) -> Self {
         VkPipeline { inner, device }
     }
 
@@ -914,22 +973,25 @@ impl<'a> VkPipeline<'a> {
     }
 }
 
-impl<'a> Drop for VkPipeline<'a> {
+impl Drop for VkPipeline {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_pipeline(self.inner, None);
+            unwrap_device(&self.device).destroy_pipeline(self.inner, None);
         }
     }
 }
 
-pub struct VkPipelineCache<'a> {
+pub struct VkPipelineCache {
     inner: vk::PipelineCache,
-    device: &'a ash::Device,
+    device: Weak<ash::Device>,
 }
 
-impl<'a> VkPipelineCache<'a> {
-    pub fn new(device: &'a ash::Device, create_info: &vk::PipelineCacheCreateInfo) -> Result<Self> {
-        let inner = unsafe { device.create_pipeline_cache(create_info, None)? };
+impl VkPipelineCache {
+    pub fn new(
+        device: Weak<ash::Device>,
+        create_info: &vk::PipelineCacheCreateInfo,
+    ) -> Result<Self> {
+        let inner = unsafe { unwrap_device(&device).create_pipeline_cache(create_info, None)? };
         Ok(VkPipelineCache { inner, device })
     }
 
@@ -942,11 +1004,10 @@ impl<'a> VkPipelineCache<'a> {
         create_info: &vk::GraphicsPipelineCreateInfo,
     ) -> Result<VkPipeline> {
         let result = unsafe {
-            self.device
-                .create_graphics_pipelines(self.inner, &[*create_info], None)
+            unwrap_device(&self.device).create_graphics_pipelines(self.inner, &[*create_info], None)
         };
         match result {
-            Ok(pipelines) => Ok(VkPipeline::from_pipeline(self.device, pipelines[0])),
+            Ok(pipelines) => Ok(VkPipeline::from_pipeline(self.device.clone(), pipelines[0])),
             Err((_pipelines, err)) => Err(err.into()),
         }
     }
@@ -956,32 +1017,31 @@ impl<'a> VkPipelineCache<'a> {
         create_info: &vk::ComputePipelineCreateInfo,
     ) -> Result<VkPipeline> {
         let result = unsafe {
-            self.device
-                .create_compute_pipelines(self.inner, &[*create_info], None)
+            unwrap_device(&self.device).create_compute_pipelines(self.inner, &[*create_info], None)
         };
         match result {
-            Ok(pipelines) => Ok(VkPipeline::from_pipeline(self.device, pipelines[0])),
+            Ok(pipelines) => Ok(VkPipeline::from_pipeline(self.device.clone(), pipelines[0])),
             Err((_pipelines, err)) => Err(err.into()),
         }
     }
 }
 
-impl<'a> Drop for VkPipelineCache<'a> {
+impl Drop for VkPipelineCache {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_pipeline_cache(self.inner, None);
+            unwrap_device(&self.device).destroy_pipeline_cache(self.inner, None);
         }
     }
 }
 
-pub struct VkRenderPass<'a> {
+pub struct VkRenderPass {
     inner: vk::RenderPass,
-    device: &'a ash::Device,
+    device: Weak<ash::Device>,
 }
 
-impl<'a> VkRenderPass<'a> {
-    pub fn new(device: &'a ash::Device, create_info: &vk::RenderPassCreateInfo) -> Result<Self> {
-        let inner = unsafe { device.create_render_pass(create_info, None)? };
+impl VkRenderPass {
+    pub fn new(device: Weak<ash::Device>, create_info: &vk::RenderPassCreateInfo) -> Result<Self> {
+        let inner = unsafe { unwrap_device(&device).create_render_pass(create_info, None)? };
         Ok(VkRenderPass { inner, device })
     }
 
@@ -990,22 +1050,22 @@ impl<'a> VkRenderPass<'a> {
     }
 }
 
-impl<'a> Drop for VkRenderPass<'a> {
+impl Drop for VkRenderPass {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_render_pass(self.inner, None);
+            unwrap_device(&self.device).destroy_render_pass(self.inner, None);
         }
     }
 }
 
-pub struct VkFramebuffer<'a> {
+pub struct VkFramebuffer {
     inner: vk::Framebuffer,
-    device: &'a ash::Device,
+    device: Weak<ash::Device>,
 }
 
-impl<'a> VkFramebuffer<'a> {
-    pub fn new(device: &'a ash::Device, create_info: &vk::FramebufferCreateInfo) -> Result<Self> {
-        let inner = unsafe { device.create_framebuffer(create_info, None)? };
+impl VkFramebuffer {
+    pub fn new(device: Weak<ash::Device>, create_info: &vk::FramebufferCreateInfo) -> Result<Self> {
+        let inner = unsafe { unwrap_device(&device).create_framebuffer(create_info, None)? };
         Ok(VkFramebuffer { inner, device })
     }
 
@@ -1014,118 +1074,10 @@ impl<'a> VkFramebuffer<'a> {
     }
 }
 
-impl<'a> Drop for VkFramebuffer<'a> {
+impl Drop for VkFramebuffer {
     fn drop(&mut self) {
         unsafe {
-            self.device.destroy_framebuffer(self.inner, None);
+            unwrap_device(&self.device).destroy_framebuffer(self.inner, None);
         }
-    }
-}
-
-// Wrapper structure used to load and manage a logical Vulkan device
-pub struct RenderDevice {
-    pub allocator: vk_mem::Allocator,
-    pub swapchain_image_views: Vec<vk::ImageView>,
-    pub swapchain_images: Vec<vk::Image>,
-    pub swapchain: VkSwapchain,
-    surface: VkSurface,
-    device: VkDevice,
-    debug_messenger: Option<VkDebugMessenger>,
-    instance: VkInstance,
-}
-
-impl RenderDevice {
-    pub fn new(window: &winit::window::Window, enable_validation: bool) -> Result<Self> {
-        unsafe {
-            let instance = VkInstance::new(window, enable_validation)?;
-
-            let debug_messenger = if enable_validation {
-                Some(VkDebugMessenger::new(&instance)?)
-            } else {
-                None
-            };
-
-            let physical_devices = instance.inner.enumerate_physical_devices()?;
-            let physical_device = select_physical_device(&physical_devices);
-
-            let surface = VkSurface::new(&instance, window)?;
-
-            let device = VkDevice::new(&instance, physical_device, &surface)?;
-
-            let swapchain = VkSwapchain::new(
-                &instance,
-                &device,
-                &surface,
-                window.inner_size().width,
-                window.inner_size().height,
-            )?;
-
-            let swapchain_images = swapchain.ext.get_swapchain_images(swapchain.inner)?;
-            let mut swapchain_image_views = Vec::new();
-            for swapchain_image in &swapchain_images {
-                let image_view = device.inner.create_image_view(
-                    &vk::ImageViewCreateInfo::builder()
-                        .image(*swapchain_image)
-                        .view_type(vk::ImageViewType::TYPE_2D)
-                        .format(swapchain.surface_format.format)
-                        .components(
-                            vk::ComponentMapping::builder()
-                                .r(vk::ComponentSwizzle::IDENTITY)
-                                .g(vk::ComponentSwizzle::IDENTITY)
-                                .b(vk::ComponentSwizzle::IDENTITY)
-                                .a(vk::ComponentSwizzle::IDENTITY)
-                                .build(),
-                        )
-                        .subresource_range(
-                            vk::ImageSubresourceRange::builder()
-                                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                                .base_mip_level(0)
-                                .level_count(1)
-                                .base_array_layer(0)
-                                .layer_count(1)
-                                .build(),
-                        ),
-                    None,
-                )?;
-                swapchain_image_views.push(image_view);
-            }
-
-            let allocator = vk_mem::Allocator::new(&vk_mem::AllocatorCreateInfo {
-                physical_device,
-                device: device.inner.clone(),
-                instance: instance.inner.clone(),
-                flags: vk_mem::AllocatorCreateFlags::NONE,
-                preferred_large_heap_block_size: 0,
-                frame_in_use_count: 0,
-                heap_size_limits: None,
-            })?;
-
-            Ok(Self {
-                allocator,
-                swapchain_image_views,
-                swapchain_images,
-                swapchain,
-                surface,
-                device,
-                debug_messenger,
-                instance,
-            })
-        }
-    }
-
-    /// Returns the internal ash device
-    pub fn raw(&self) -> &ash::Device {
-        &self.device.inner
-    }
-
-    /// Returns the present queue for the device
-    pub fn get_present_queue(&self) -> vk::Queue {
-        self.device.present_queue()
-    }
-
-    /// Returns the queue family index for the graphics queue
-    pub fn get_graphics_family_index(&self) -> u32 {
-        // TODO: Return the correct family index
-        0
     }
 }
