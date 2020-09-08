@@ -944,10 +944,10 @@ pub fn show(elf_path: &impl AsRef<Path>) -> ! {
 
                 renderer.end_frame(cmd_buffer);
             }
-            Event::LoopDestroyed => {}
-            _ => {
+            Event::LoopDestroyed => {
                 renderer.wait_for_idle();
             }
+            _ => {}
         });
     }
 }
