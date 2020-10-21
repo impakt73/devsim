@@ -14,6 +14,8 @@ ash = "0.31"
 vk-mem = "0.2"
 ash-window = "0.5"
 shaderc = "0.6"
+imgui = "0.5"
+imgui-winit-support = "0.5"
 
 [dependencies.image]
 default-features = false

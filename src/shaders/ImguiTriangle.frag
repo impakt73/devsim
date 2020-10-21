@@ -1,6 +1,7 @@
 #version 450
 
 layout(location = 0) in vec2 vTexCoord;
+layout(location = 1) in vec4 vColor;
 
 layout(location = 0, index = 0) out vec4 OutFinalColor;
 
@@ -8,5 +9,5 @@ layout(location = 0, index = 0) out vec4 OutFinalColor;
 
 void main()
 {
-    OutFinalColor = vec4(texture(sampler2D(uTextures[0], uSampler), vTexCoord).rgb, 1.0);
+    OutFinalColor = vColor * texture(sampler2D(uTextures[MaterialIndex()], uSampler), vTexCoord).r;
 }
