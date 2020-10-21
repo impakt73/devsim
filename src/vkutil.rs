@@ -316,6 +316,7 @@ pub struct VkDevice {
     physical_device: vk::PhysicalDevice,
     queues: Vec<vk::Queue>,
     queues_by_type: [vk::Queue; VK_QUEUE_TYPE_COUNT],
+    queue_family_indices_by_type: [usize; VK_QUEUE_TYPE_COUNT],
     present_queue: vk::Queue,
 }
 
@@ -376,13 +377,16 @@ impl VkDevice {
                 .map(|(idx, _info)| device.get_device_queue(idx as u32, 0))
                 .collect::<Vec<_>>();
 
+            let queue_family_indices_by_type = [
+                find_best_queue_for_usage(&queue_family_properties, vk::QueueFlags::GRAPHICS),
+                find_best_queue_for_usage(&queue_family_properties, vk::QueueFlags::COMPUTE),
+                find_best_queue_for_usage(&queue_family_properties, vk::QueueFlags::TRANSFER),
+            ];
+
             let queues_by_type = [
-                queues
-                    [find_best_queue_for_usage(&queue_family_properties, vk::QueueFlags::GRAPHICS)],
-                queues
-                    [find_best_queue_for_usage(&queue_family_properties, vk::QueueFlags::COMPUTE)],
-                queues
-                    [find_best_queue_for_usage(&queue_family_properties, vk::QueueFlags::TRANSFER)],
+                queues[queue_family_indices_by_type[0]],
+                queues[queue_family_indices_by_type[1]],
+                queues[queue_family_indices_by_type[2]],
             ];
 
             let present_queue = queues[present_queue_family_index as usize];
@@ -392,6 +396,7 @@ impl VkDevice {
                 physical_device,
                 queues,
                 queues_by_type,
+                queue_family_indices_by_type,
                 present_queue,
             })
         }
@@ -411,6 +416,18 @@ impl VkDevice {
 
     pub fn transfer_queue(&self) -> vk::Queue {
         self.queues_by_type[VkQueueType::Transfer as usize]
+    }
+
+    pub fn graphics_queue_family_index(&self) -> usize {
+        self.queue_family_indices_by_type[VkQueueType::Graphics as usize]
+    }
+
+    pub fn compute_queue_family_index(&self) -> usize {
+        self.queue_family_indices_by_type[VkQueueType::Compute as usize]
+    }
+
+    pub fn transfer_queue_family_index(&self) -> usize {
+        self.queue_family_indices_by_type[VkQueueType::Transfer as usize]
     }
 
     pub fn present_queue(&self) -> vk::Queue {
