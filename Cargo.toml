@@ -3,6 +3,7 @@ name = "devsim"
 version = "0.1.0"
 authors = ["Gregory Mitrano <gregory.mitrano@gmail.com>"]
 edition = "2018"
+default-run = "view"
 
 [dependencies]
 goblin = "0.2"
