@@ -314,7 +314,6 @@ fn unwrap_allocator(allocator: &Weak<vk_mem::Allocator>) -> Arc<vk_mem::Allocato
 pub struct VkDevice {
     inner: Arc<ash::Device>,
     physical_device: vk::PhysicalDevice,
-    queues: Vec<vk::Queue>,
     queues_by_type: [vk::Queue; VK_QUEUE_TYPE_COUNT],
     queue_family_indices_by_type: [usize; VK_QUEUE_TYPE_COUNT],
     present_queue: vk::Queue,
@@ -394,7 +393,6 @@ impl VkDevice {
             Ok(Self {
                 inner: Arc::new(device),
                 physical_device,
-                queues,
                 queues_by_type,
                 queue_family_indices_by_type,
                 present_queue,
