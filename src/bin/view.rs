@@ -4,7 +4,6 @@ use ash::{
 };
 use imgui::{DrawCmd, DrawCmdParams};
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
-use std::path::Path;
 use std::sync::{Arc, Weak};
 use std::time::Instant;
 use winit::{
@@ -16,11 +15,11 @@ use winit::{
 };
 
 use devsim::vkutil::*;
-use gumdrop::Options;
 use imgui::internal::RawWrapper;
 use std::io;
 use std::io::Write;
 use std::slice;
+use clap::Clap;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -1183,11 +1182,11 @@ impl ImguiRenderer {
     }
 }
 
-pub fn show(elf_path: &impl AsRef<Path>) -> ! {
+fn show(opts: &SimOptions) -> ! {
     let mut hw_device = devsim::device::Device::new();
 
     hw_device
-        .load_elf(&elf_path)
+        .load_elf(&opts.elf_path)
         .expect("Failed to load elf file");
 
     let (fb_width, fb_height) = hw_device
@@ -1703,16 +1702,15 @@ pub fn show(elf_path: &impl AsRef<Path>) -> ! {
     }
 }
 
-#[derive(Debug, Options)]
-struct SimOptions {
-    #[options(help = "print help message")]
-    help: bool,
 
-    #[options(free, required, help = "path to an elf file to execute")]
+#[derive(Debug, Clap)]
+#[clap(version)]
+struct SimOptions {
+    /// Path to a RISC-V elf to execute
     elf_path: String,
 }
 
 fn main() {
-    let opts = SimOptions::parse_args_default_or_exit();
-    show(&opts.elf_path);
+    let opts = SimOptions::parse();
+    show(&opts);
 }

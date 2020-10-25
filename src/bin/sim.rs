@@ -1,21 +1,23 @@
 use devsim::device::Device;
-use gumdrop::Options;
 use image::RgbaImage;
 use std::time::Duration;
+use clap::Clap;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-#[derive(Debug, Options)]
+#[derive(Debug, Clap)]
+#[clap(version)]
 struct SimOptions {
-    #[options(help = "print help message")]
-    help: bool,
-
-    #[options(free, required, help = "path to an elf file to execute")]
+    /// Path to a RISC-V elf to execute
     elf_path: String,
+
+    /// Path to write out the framebuffer as a png
+    #[clap(short='o')]
+    framebuffer_path: Option<String>,
 }
 
 fn main() -> Result<()> {
-    let opts = SimOptions::parse_args_default_or_exit();
+    let opts = SimOptions::parse();
 
     let mut device = Device::new();
 
@@ -74,8 +76,10 @@ fn main() -> Result<()> {
 
     let image = RgbaImage::from_raw(width, height, fb_data)
         .expect("Failed to create image from framebuffer");
+
+    let image_path: Option<&str> = opts.framebuffer_path.as_deref();
     image
-        .save("image.png")
+        .save(image_path.unwrap_or("image.png"))
         .expect("Failed to write image output!");
 
     Ok(())
