@@ -1531,14 +1531,15 @@ fn show(opts: &SimOptions) -> ! {
                             renderer.imgui_pipeline.raw(),
                         );
 
+                        let fb_scale = draw_data.framebuffer_scale;
                         device.cmd_set_viewport(
                             cmd_buffer,
                             0,
                             &[vk::Viewport::builder()
-                                .x(draw_data.display_pos[0])
-                                .y(draw_data.display_pos[1])
-                                .width(draw_data.display_size[0])
-                                .height(draw_data.display_size[1])
+                                .x(draw_data.display_pos[0] * fb_scale[0])
+                                .y(draw_data.display_pos[1] * fb_scale[1])
+                                .width(draw_data.display_size[0] * fb_scale[0])
+                                .height(draw_data.display_size[1] * fb_scale[1])
                                 .build()],
                         );
 
