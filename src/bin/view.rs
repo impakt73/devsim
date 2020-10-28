@@ -14,12 +14,12 @@ use winit::{
     window::WindowBuilder,
 };
 
+use clap::Clap;
 use devsim::vkutil::*;
 use imgui::internal::RawWrapper;
 use std::io;
 use std::io::Write;
 use std::slice;
-use clap::Clap;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -1702,7 +1702,6 @@ fn show(opts: &SimOptions) -> ! {
         });
     }
 }
-
 
 #[derive(Debug, Clap)]
 #[clap(version)]

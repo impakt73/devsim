@@ -1,7 +1,7 @@
+use clap::Clap;
 use devsim::device::Device;
 use image::RgbaImage;
 use std::time::Duration;
-use clap::Clap;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -12,8 +12,8 @@ struct SimOptions {
     elf_path: String,
 
     /// Path to write out the framebuffer as a png
-    #[clap(short='o')]
-    framebuffer_path: Option<String>,
+    #[clap(short = 'o')]
+    image_path: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -77,7 +77,7 @@ fn main() -> Result<()> {
     let image = RgbaImage::from_raw(width, height, fb_data)
         .expect("Failed to create image from framebuffer");
 
-    let image_path: Option<&str> = opts.framebuffer_path.as_deref();
+    let image_path: Option<&str> = opts.image_path.as_deref();
     image
         .save(image_path.unwrap_or("image.png"))
         .expect("Failed to write image output!");
