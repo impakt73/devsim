@@ -6,16 +6,16 @@ edition = "2018"
 default-run = "view"
 
 [dependencies]
-goblin = "0.2"
-pbr = "1"
-winit = "0.22"
-ash = "0.31"
-vk-mem = "0.2"
-ash-window = "0.5"
-shaderc = "0.6"
-imgui = "0.5"
+ash                 = "0.31"
+ash-window          = "0.5"
+clap                = "3.0.0-beta.2"
+goblin              = "0.2"
+imgui               = "0.5"
 imgui-winit-support = "0.5"
-clap = "3.0.0-beta.2"
+pbr                 = "1"
+shaderc             = "0.6"
+vk-mem              = "0.2"
+winit               = "0.22"
 
 [dependencies.image]
 default-features = false
