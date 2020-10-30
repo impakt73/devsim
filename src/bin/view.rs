@@ -1264,6 +1264,15 @@ impl Simulation {
         }
     }
 
+    /// If the simulator is running, pause it. Otherwise, resume it
+    fn toggle(&mut self) {
+        if self.is_running() {
+            self.pause();
+        } else {
+            self.resume();
+        }
+    }
+
     /// Returns true if the simulator is running
     fn is_running(&self) -> bool {
         self.state == SimulationState::Running
