@@ -19,6 +19,7 @@ use devsim::vkutil::*;
 use imgui::internal::RawWrapper;
 use std::io;
 use std::io::Write;
+use std::path::Path;
 use std::slice;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -1182,17 +1183,128 @@ impl ImguiRenderer {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum SimulationState {
+    Running,
+    Paused,
+}
+
+/// Simulation control object
+/// This object is used to simplify interactions with the underlying device simulation code
+/// TODO: The lower level interface should be cleaned up to avoid the need to recreate the device during resets.
+struct Simulation {
+    device: Option<devsim::device::Device>,
+    elf_path: Option<String>,
+    state: SimulationState,
+    fb_width: u32,
+    fb_height: u32,
+}
+
+impl Simulation {
+    fn new() -> Result<Self> {
+        // Create a device so we can query the framebuffer size
+        let mut device = devsim::device::Device::new();
+        let (fb_width, fb_height) = device.query_framebuffer_size()?;
+
+        Ok(Self {
+            device: None,
+            elf_path: None,
+            state: SimulationState::Running,
+            fb_width,
+            fb_height,
+        })
+    }
+
+    /// Loads an ELF file from the provided path into the simulator
+    fn load_elf(&mut self, path: &impl AsRef<Path>) -> Result<()> {
+        self.elf_path = Some(path.as_ref().to_str().unwrap().to_string());
+        self.reset()?;
+
+        Ok(())
+    }
+
+    /// Resets the simulator and reloads the current ELF file if there is one
+    fn reset(&mut self) -> Result<()> {
+        if let Some(path) = &self.elf_path {
+            let mut device = devsim::device::Device::new();
+            device.load_elf(path)?;
+
+            self.device = Some(device);
+        }
+
+        Ok(())
+    }
+
+    /// Returns the width of the framebuffer image inside the device
+    fn framebuffer_width(&self) -> u32 {
+        self.fb_width
+    }
+
+    /// Returns the height of the framebuffer image inside the device
+    fn framebuffer_height(&self) -> u32 {
+        self.fb_height
+    }
+
+    /// Returns the size in bytes of the framebuffer image inside the device
+    fn framebuffer_size(&self) -> usize {
+        (self.fb_width * self.fb_height * 4) as usize
+    }
+
+    /// Pauses the simulator so that future calls to update don't trigger any work
+    fn pause(&mut self) {
+        if self.state == SimulationState::Running {
+            self.state = SimulationState::Paused;
+        }
+    }
+
+    /// Resumes the simulator so that future calls to update trigger simulation work
+    fn resume(&mut self) {
+        if self.state == SimulationState::Paused {
+            self.state = SimulationState::Running;
+        }
+    }
+
+    /// Returns true if the simulator is running
+    fn is_running(&self) -> bool {
+        self.state == SimulationState::Running
+    }
+
+    /// Updates the simulation state if the simulation state is currently valid and returns the framebuffer data
+    /// via the provided slice. The slice should be large enough to hold the framebuffer data from the device.
+    fn update(&mut self, fb_data: &mut [u8]) {
+        if self.state == SimulationState::Running {
+            if let Some(device) = &mut self.device {
+                device.enable();
+                loop {
+                    match device.query_is_halted() {
+                        Ok(is_halted) => {
+                            if !is_halted {
+                                // Still executing...
+                            } else {
+                                break;
+                            }
+                        }
+                        Err(err) => {
+                            println!("Device error: {}", err);
+                            break;
+                        }
+                    }
+                }
+
+                device
+                    .dump_framebuffer(fb_data)
+                    .expect("Failed to dump device framebuffer!");
+            }
+        }
+    }
+}
+
+/// Shows the simulation window with the provided options
 fn show(opts: &SimOptions) -> ! {
-    let mut hw_device = devsim::device::Device::new();
-
-    hw_device
-        .load_elf(&opts.elf_path)
-        .expect("Failed to load elf file");
-
-    let (fb_width, fb_height) = hw_device
-        .query_framebuffer_size()
-        .expect("Failed to query framebuffer size");
-    let image_size_bytes = fb_width * fb_height * 4;
+    let mut sim = Simulation::new().expect("Failed to create simulation");
+    if let Some(elf_path) = &opts.elf_path {
+        sim.load_elf(elf_path).expect("Failed to load elf");
+    }
 
     let window_width = 1280;
     let window_height = 720;
@@ -1214,8 +1326,14 @@ fn show(opts: &SimOptions) -> ! {
     let mut platform = WinitPlatform::init(&mut context);
     platform.attach_window(context.io_mut(), &window, HiDpiMode::Default);
 
-    let mut renderer = Renderer::new(&window, fb_width, fb_height, true, &mut context)
-        .expect("Failed to create renderer");
+    let mut renderer = Renderer::new(
+        &window,
+        sim.framebuffer_width(),
+        sim.framebuffer_height(),
+        true,
+        &mut context,
+    )
+    .expect("Failed to create renderer");
 
     unsafe {
         // TODO: Find a better way to initialize these vectors
@@ -1244,6 +1362,9 @@ fn show(opts: &SimOptions) -> ! {
                         //       This will be fixed in a future change.
                         renderer.recreate_swapchain(&window).unwrap();
                     }
+                    WindowEvent::DroppedFile(path) => {
+                        sim.load_elf(&path).expect("Failed to load elf");
+                    }
                     _ => {}
                 },
                 Event::MainEventsCleared => {
@@ -1258,40 +1379,18 @@ fn show(opts: &SimOptions) -> ! {
                         .expect("Failed to prepare frame");
 
                     let ui = context.frame();
-                    // application-specific rendering *under the UI*
-
-                    // Enable the device
-                    hw_device.enable();
-
-                    loop {
-                        match hw_device.query_is_halted() {
-                            Ok(is_halted) => {
-                                if !is_halted {
-                                    // Still executing...
-                                } else {
-                                    break;
-                                }
-                            }
-                            Err(err) => {
-                                println!("Device error: {}", err);
-                                break;
-                            }
-                        }
-                    }
 
                     let fb_upload_buffer = &renderer.fb_upload_buffer;
                     let p_fb_upload_buf_mem = fb_upload_buffer.info().get_mapped_data();
-                    let p_current_fb_upload_buf_mem = p_fb_upload_buf_mem.offset(
-                        (image_size_bytes * (renderer.get_cur_swapchain_idx() as u32)) as isize,
-                    ) as *mut u8;
+                    let p_current_fb_upload_buf_mem = p_fb_upload_buf_mem
+                        .add(sim.framebuffer_size() * renderer.get_cur_swapchain_idx())
+                        as *mut u8;
                     let mut current_fb_upload_buf_slice = core::slice::from_raw_parts_mut(
                         p_current_fb_upload_buf_mem,
-                        image_size_bytes as usize,
+                        sim.framebuffer_size(),
                     );
 
-                    hw_device
-                        .dump_framebuffer(&mut current_fb_upload_buf_slice)
-                        .expect("Failed to dump device framebuffer!");
+                    sim.update(&mut current_fb_upload_buf_slice);
 
                     let device = renderer.get_device();
 
@@ -1326,8 +1425,7 @@ fn show(opts: &SimOptions) -> ! {
                     );
 
                     // Copy the latest device output to the framebuffer image
-                    let buffer_offset =
-                        (renderer.get_cur_swapchain_idx() as u32) * image_size_bytes;
+                    let buffer_offset = renderer.get_cur_swapchain_idx() * sim.framebuffer_size();
                     device.cmd_copy_buffer_to_image(
                         cmd_buffer,
                         fb_upload_buffer.raw(),
@@ -1342,8 +1440,8 @@ fn show(opts: &SimOptions) -> ! {
                                 layer_count: 1,
                             })
                             .image_extent(vk::Extent3D {
-                                width: fb_width,
-                                height: fb_height,
+                                width: sim.framebuffer_width(),
+                                height: sim.framebuffer_height(),
                                 depth: 1,
                             })
                             .build()],
@@ -1436,9 +1534,39 @@ fn show(opts: &SimOptions) -> ! {
 
                     device.cmd_draw(cmd_buffer, 3, 1, 0, 0);
 
-                    // Show an ImGUI demo window for now
-                    let mut opened = true;
-                    ui.show_demo_window(&mut opened);
+                    if let Some(main_menu_bar) = ui.begin_main_menu_bar() {
+                        if let Some(file_menu) = ui.begin_menu(imgui::im_str!("File"), true) {
+                            if imgui::MenuItem::new(imgui::im_str!("Exit")).build(&ui) {
+                                *control_flow = ControlFlow::Exit
+                            }
+
+                            file_menu.end(&ui);
+                        }
+                        if let Some(simulation_menu) =
+                            ui.begin_menu(imgui::im_str!("Simulation"), true)
+                        {
+                            if imgui::MenuItem::new(imgui::im_str!("Reset")).build(&ui) {
+                                sim.reset().expect("Failed to reset simulation");
+                            }
+
+                            if imgui::MenuItem::new(imgui::im_str!("Pause"))
+                                .enabled(sim.is_running())
+                                .build(&ui)
+                            {
+                                sim.pause();
+                            }
+
+                            if imgui::MenuItem::new(imgui::im_str!("Resume"))
+                                .enabled(!sim.is_running())
+                                .build(&ui)
+                            {
+                                sim.resume();
+                            }
+
+                            simulation_menu.end(&ui);
+                        }
+                        main_menu_bar.end(&ui);
+                    }
 
                     platform.prepare_render(&ui, &window);
                     let draw_data = ui.render();
@@ -1707,7 +1835,7 @@ fn show(opts: &SimOptions) -> ! {
 #[clap(version)]
 struct SimOptions {
     /// Path to a RISC-V elf to execute
-    elf_path: String,
+    elf_path: Option<String>,
 }
 
 fn main() {
