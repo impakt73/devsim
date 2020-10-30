@@ -1272,8 +1272,9 @@ impl Simulation {
     /// Updates the simulation state if the simulation state is currently valid and returns the framebuffer data
     /// via the provided slice. The slice should be large enough to hold the framebuffer data from the device.
     fn update(&mut self, fb_data: &mut [u8]) {
-        if self.state == SimulationState::Running {
-            if let Some(device) = &mut self.device {
+        if let Some(device) = &mut self.device {
+            // We only want to update the actual device simulation if the simulation is currently running
+            if self.state == SimulationState::Running {
                 device.enable();
                 loop {
                     match device.query_is_halted() {
@@ -1290,11 +1291,12 @@ impl Simulation {
                         }
                     }
                 }
-
-                device
-                    .dump_framebuffer(fb_data)
-                    .expect("Failed to dump device framebuffer!");
             }
+
+            // The framebuffer data from the device needs to be dumped regardless of the current simulation state
+            device
+                .dump_framebuffer(fb_data)
+                .expect("Failed to dump device framebuffer!");
         }
     }
 }
