@@ -1,4 +1,4 @@
-# devsim
+# devsim ![CI](https://github.com/impakt73/devsim/workflows/CI/badge.svg)
 
 Quick hardware development-cycle using [Verilator](https://github.com/verilator/verilator),
 [Rust](https://www.rust-lang.org/learn/get-started), and [ImGui](https://github.com/ocornut/imgui).
