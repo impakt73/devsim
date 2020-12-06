@@ -1560,18 +1560,13 @@ fn show(opts: &SimOptions) -> ! {
                                 sim.reset().expect("Failed to reset simulation");
                             }
 
-                            if imgui::MenuItem::new(imgui::im_str!("Pause"))
-                                .enabled(sim.is_running())
-                                .build(&ui)
-                            {
-                                sim.pause();
-                            }
-
-                            if imgui::MenuItem::new(imgui::im_str!("Resume"))
-                                .enabled(!sim.is_running())
-                                .build(&ui)
-                            {
-                                sim.resume();
+                            let toggle_string = if sim.is_running() {
+                                imgui::im_str!("Pause")
+                            } else {
+                                imgui::im_str!("Resume")
+                            };
+                            if imgui::MenuItem::new(toggle_string).build(&ui) {
+                                sim.toggle();
                             }
 
                             simulation_menu.end(&ui);
