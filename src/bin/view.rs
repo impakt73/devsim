@@ -15,12 +15,12 @@ use winit::{
 };
 
 use clap::Clap;
-use devsim::vkutil::*;
 use imgui::internal::RawWrapper;
 use std::io;
 use std::io::Write;
 use std::path::Path;
 use std::slice;
+use vkutil::*;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 

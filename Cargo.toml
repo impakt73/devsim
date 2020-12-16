@@ -16,6 +16,7 @@ pbr                 = "1"
 shaderc             = "0.6"
 vk-mem              = "0.2"
 winit               = "0.22"
+vkutil = { path = "../vkutil" }
 
 [dependencies.image]
 default-features = false

@@ -312,6 +312,7 @@ dependencies = [
  "pbr",
  "shaderc",
  "vk-mem",
+ "vkutil",
  "winit",
 ]
 
@@ -1181,6 +1182,16 @@ dependencies = [
  "ash",
  "bitflags",
  "cc",
+]
+
+[[package]]
+name = "vkutil"
+version = "0.1.0"
+dependencies = [
+ "ash",
+ "ash-window",
+ "vk-mem",
+ "winit",
 ]
 
 [[package]]
